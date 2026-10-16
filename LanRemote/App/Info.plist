@@ -29,9 +29,10 @@
 	<array>
 		<string>_roap._tcp</string>
 		<string>_udap._tcp</string>
+		<string>_androidtvremote2._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>O LanRemote precisa acessar sua rede Wi-Fi local para descobrir e controlar sua TV LG NetCast diretamente.</string>
+	<string>O LanRemote precisa acessar sua rede Wi-Fi local para descobrir e controlar sua TV LG NetCast e a TV Box que liga a TV.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresPersistentWiFi</key>

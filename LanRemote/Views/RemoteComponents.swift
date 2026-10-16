@@ -9,7 +9,7 @@ struct RemoteButtonStyle: ButtonStyle {
     var height: CGFloat = 44
     var cornerRadius: CGFloat = 12
     var border: Color = Color(white: 0.28)
-    
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -25,27 +25,36 @@ struct RemoteButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .stroke(configuration.isPressed ? Color.white.opacity(0.3) : border, lineWidth: 1)
             )
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
             .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .animation(.easeInOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 
+/// Power button: red when it will switch the TV off, green when it will switch it on.
 struct PowerButtonStyle: ButtonStyle {
+    var turnsOn: Bool = false
+
+    private var tint: Color {
+        turnsOn ? Color(red: 0.13, green: 0.55, blue: 0.27) : Color(red: 0.78, green: 0.12, blue: 0.12)
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .bold))
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: 54)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(configuration.isPressed ? Color.red.opacity(0.7) : Color(red: 0.78, green: 0.12, blue: 0.12))
-                    .shadow(color: Color.red.opacity(0.4), radius: 5, x: 0, y: 2)
+                    .fill(configuration.isPressed ? tint.opacity(0.7) : tint)
+                    .shadow(color: tint.opacity(0.4), radius: 5, x: 0, y: 2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.white.opacity(0.25), lineWidth: 1)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
             .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .animation(.easeInOut(duration: 0.08), value: configuration.isPressed)
     }
@@ -53,11 +62,11 @@ struct PowerButtonStyle: ButtonStyle {
 
 struct ColorKeyStyle: ButtonStyle {
     var color: Color
-    
+
     func makeBody(configuration: Configuration) -> some View {
         RoundedRectangle(cornerRadius: 8)
             .fill(configuration.isPressed ? color.opacity(0.7) : color)
-            .frame(height: 22)
+            .frame(height: 26)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.white.opacity(0.3), lineWidth: 1)
@@ -76,11 +85,52 @@ struct ScaleButtonStyle: ButtonStyle {
     }
 }
 
+/// Icon over a short caption, so a button says what it is instead of relying on memory.
+struct ControlLabel: View {
+    let help: ControlHelp
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(systemName: help.symbol)
+                .font(.system(size: 15, weight: .semibold))
+            Text(help.label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.horizontal, 2)
+    }
+}
+
+/// Small card grouping related controls under a title.
+struct RemoteSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundColor(Color(white: 0.5))
+                .padding(.leading, 2)
+            content
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(white: 0.16).opacity(0.8))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(white: 0.24), lineWidth: 1))
+        )
+    }
+}
+
 // MARK: - Circular D-Pad Layout
 
 struct DPadView: View {
     let onKey: (TVKey) -> Void
-    
+
     var body: some View {
         ZStack {
             // Outer background disc
@@ -95,54 +145,12 @@ struct DPadView: View {
                 .frame(width: 188, height: 188)
                 .shadow(color: Color.black.opacity(0.45), radius: 8, x: 0, y: 4)
                 .overlay(Circle().stroke(Color(white: 0.28), lineWidth: 1.5))
-            
-            // Up
-            Button(action: { onKey(.up) }) {
-                Image(systemName: "triangle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(white: 0.9))
-                    .frame(width: 70, height: 50)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .offset(y: -58)
-            
-            // Down
-            Button(action: { onKey(.down) }) {
-                Image(systemName: "triangle.fill")
-                    .rotationEffect(.degrees(180))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(white: 0.9))
-                    .frame(width: 70, height: 50)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .offset(y: 58)
-            
-            // Left
-            Button(action: { onKey(.left) }) {
-                Image(systemName: "triangle.fill")
-                    .rotationEffect(.degrees(-90))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(white: 0.9))
-                    .frame(width: 50, height: 70)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .offset(x: -58)
-            
-            // Right
-            Button(action: { onKey(.right) }) {
-                Image(systemName: "triangle.fill")
-                    .rotationEffect(.degrees(90))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(white: 0.9))
-                    .frame(width: 50, height: 70)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .offset(x: 58)
-            
+
+            arrow(.up, rotation: 0, size: CGSize(width: 70, height: 50), offset: CGSize(width: 0, height: -58))
+            arrow(.down, rotation: 180, size: CGSize(width: 70, height: 50), offset: CGSize(width: 0, height: 58))
+            arrow(.left, rotation: -90, size: CGSize(width: 50, height: 70), offset: CGSize(width: -58, height: 0))
+            arrow(.right, rotation: 90, size: CGSize(width: 50, height: 70), offset: CGSize(width: 58, height: 0))
+
             // Center OK button
             Button(action: { onKey(.ok) }) {
                 ZStack {
@@ -157,15 +165,30 @@ struct DPadView: View {
                         .frame(width: 64, height: 64)
                         .shadow(color: Color.black.opacity(0.35), radius: 4, x: 0, y: 2)
                         .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1.2))
-                    
+
                     Text("OK")
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
             }
             .buttonStyle(ScaleButtonStyle())
+            .controlHelp(Help.ok)
         }
         .frame(width: 196, height: 196)
+    }
+
+    private func arrow(_ key: TVKey, rotation: Double, size: CGSize, offset: CGSize) -> some View {
+        Button(action: { onKey(key) }) {
+            Image(systemName: "triangle.fill")
+                .rotationEffect(.degrees(rotation))
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(Color(white: 0.9))
+                .frame(width: size.width, height: size.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .controlHelp(Help.arrows)
+        .offset(offset)
     }
 }
 
@@ -173,44 +196,22 @@ struct DPadView: View {
 
 struct RockerSwitchView: View {
     let title: String
+    let upSymbol: String
+    let downSymbol: String
     let upKey: TVKey
     let downKey: TVKey
+    let upHelp: ControlHelp
+    let downHelp: ControlHelp
     let onKey: (TVKey) -> Void
-    
+
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: { onKey(upKey) }) {
-                VStack(spacing: 3) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .bold))
-                    Text(title)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 58)
-                .background(Color(white: 0.22))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(ScaleButtonStyle())
-            
+            half(symbol: upSymbol, key: upKey, help: upHelp)
+
             Divider()
                 .background(Color(white: 0.32))
-            
-            Button(action: { onKey(downKey) }) {
-                VStack(spacing: 3) {
-                    Image(systemName: "minus")
-                        .font(.system(size: 16, weight: .bold))
-                    Text(title)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 58)
-                .background(Color(white: 0.22))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(ScaleButtonStyle())
+
+            half(symbol: downSymbol, key: downKey, help: downHelp)
         }
         .frame(width: 72)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -218,7 +219,32 @@ struct RockerSwitchView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(white: 0.32), lineWidth: 1)
         )
+        .overlay(
+            // The name sits on the seam, so it reads as one control with two ends.
+            Text(title)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(Color(white: 0.78))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color(white: 0.17)))
+                .overlay(Capsule().stroke(Color(white: 0.32), lineWidth: 1))
+                .allowsHitTesting(false)
+        )
         .shadow(color: Color.black.opacity(0.35), radius: 4, y: 2)
+    }
+
+    private func half(symbol: String, key: TVKey, help: ControlHelp) -> some View {
+        Button(action: { onKey(key) }) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(Color(white: 0.22))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .controlHelp(help)
     }
 }
 
@@ -226,27 +252,20 @@ struct RockerSwitchView: View {
 
 struct NumericKeypadView: View {
     let onKey: (TVKey) -> Void
-    
-    private let digits: [[TVKey]] = [
+
+    private let rows: [[TVKey]] = [
         [.digit1, .digit2, .digit3],
         [.digit4, .digit5, .digit6],
         [.digit7, .digit8, .digit9],
-        [.dash, .digit0, .previousChannel]
+        [.previousChannel, .digit0, .info]
     ]
-    
+
     var body: some View {
         VStack(spacing: 8) {
-            ForEach(0..<digits.count, id: \.self) { row in
+            ForEach(0..<rows.count, id: \.self) { row in
                 HStack(spacing: 8) {
-                    ForEach(digits[row]) { key in
-                        Button(action: { onKey(key) }) {
-                            Text(key.label)
-                        }
-                        .buttonStyle(RemoteButtonStyle(
-                            bg: Color(white: 0.24),
-                            height: 42,
-                            cornerRadius: 10
-                        ))
+                    ForEach(rows[row]) { key in
+                        keyButton(key)
                     }
                 }
             }
@@ -258,18 +277,41 @@ struct NumericKeypadView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(white: 0.26), lineWidth: 1))
         )
     }
+
+    private func keyButton(_ key: TVKey) -> some View {
+        let help: ControlHelp
+        switch key {
+        case .previousChannel: help = Help.previousChannel
+        case .info: help = Help.info
+        default: help = Help.digit
+        }
+        return Button(action: { onKey(key) }) {
+            if key.isDigit {
+                Text(key.label)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: help.symbol)
+                    Text(help.label)
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+        }
+        .buttonStyle(RemoteButtonStyle(bg: Color(white: 0.24), height: 44, cornerRadius: 10))
+        .controlHelp(help)
+    }
 }
 
 // MARK: - Hidden Volume View Representable
 
 struct HiddenVolumeViewRepresentable: UIViewRepresentable {
     let handler: VolumeButtonHandler
-    
+
     func makeUIView(context: Context) -> UIView {
         let container = UIView(frame: .zero)
         handler.attachHiddenView(to: container)
         return container
     }
-    
+
     func updateUIView(_ uiView: UIView, context: Context) {}
 }

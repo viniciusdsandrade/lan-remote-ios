@@ -7,15 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		03C4135A27C915C4EACA7B3E /* RemoteHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 091B07AEB5D71CDB6929FD86 /* RemoteHelp.swift */; };
+		0A995A1952C6FFA57086E67E /* AndroidTVRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485BA31BA505293995C42790 /* AndroidTVRemote.swift */; };
 		1E8362808910CD771EE928EF /* TVKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F6DA71A5704B15E50E1D5 /* TVKey.swift */; };
 		21CE4CADBF779D8A729CD475 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 04B357959760AD8680291990 /* Assets.xcassets */; };
 		29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */; };
 		4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */; };
 		645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75966A6C53E052479564B23 /* NetworkDiscovery.swift */; };
 		68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61301AED170777732BAB908 /* SettingsView.swift */; };
+		74012F9501BAE451489FAF42 /* AndroidTVIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */; };
+		74530E3242C79A9F6BA57254 /* AndroidTVProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A8065E9B4199E4B99E1B99B /* AndroidTVProtocol.swift */; };
 		A0250AEE0F917854372274CB /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9D57750D07DCEF3A9DA278 /* RemoteView.swift */; };
 		A5B44CB14635EE3962B61C84 /* DiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */; };
 		AF75B11F2C5DE3AA004CF48B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7A15488CC40A2BD3650C5420 /* PrivacyInfo.xcprivacy */; };
+		B4E28A3EE6F94031B14AC51E /* TVBoxLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7709BCD8023FA41A710B8544 /* TVBoxLink.swift */; };
 		BB9C668423DE248249863DD0 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85BE60C0B175A1AF4924F01 /* HapticManager.swift */; };
 		DA673DA31B3091ADA180C6D1 /* LanRemoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */; };
 		E56E1761134FD5BD5C8DAD47 /* LGTVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66556F8192F70568FAA0807C /* LGTVClient.swift */; };
@@ -35,15 +40,20 @@
 
 /* Begin PBXFileReference section */
 		04B357959760AD8680291990 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		091B07AEB5D71CDB6929FD86 /* RemoteHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHelp.swift; sourceTree = "<group>"; };
+		1A8065E9B4199E4B99E1B99B /* AndroidTVProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVProtocol.swift; sourceTree = "<group>"; };
 		22F4410D61B426F6A329E046 /* RemoteComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteComponents.swift; sourceTree = "<group>"; };
 		230A773E379AD6A2A4D9CADD /* LanRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LanRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		485BA31BA505293995C42790 /* AndroidTVRemote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVRemote.swift; sourceTree = "<group>"; };
 		57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeButtonHandler.swift; sourceTree = "<group>"; };
 		66556F8192F70568FAA0807C /* LGTVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LGTVClient.swift; sourceTree = "<group>"; };
 		6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteTests.swift; sourceTree = "<group>"; };
+		7709BCD8023FA41A710B8544 /* TVBoxLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVBoxLink.swift; sourceTree = "<group>"; };
 		78BA74FF2F673E1B4ABBC465 /* TVConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVConfig.swift; sourceTree = "<group>"; };
 		7A15488CC40A2BD3650C5420 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
 		83B8D4D9A46003273BEED882 /* LanRemoteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LanRemoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVIdentity.swift; sourceTree = "<group>"; };
 		A61301AED170777732BAB908 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F15F6DA71A5704B15E50E1D5 /* TVKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVKey.swift; sourceTree = "<group>"; };
 		F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteApp.swift; sourceTree = "<group>"; };
@@ -102,6 +112,7 @@
 			children = (
 				7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */,
 				22F4410D61B426F6A329E046 /* RemoteComponents.swift */,
+				091B07AEB5D71CDB6929FD86 /* RemoteHelp.swift */,
 				FC9D57750D07DCEF3A9DA278 /* RemoteView.swift */,
 				A61301AED170777732BAB908 /* SettingsView.swift */,
 			);
@@ -131,9 +142,13 @@
 		D8B25CAC66BC26100EBB70AC /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */,
+				1A8065E9B4199E4B99E1B99B /* AndroidTVProtocol.swift */,
+				485BA31BA505293995C42790 /* AndroidTVRemote.swift */,
 				F85BE60C0B175A1AF4924F01 /* HapticManager.swift */,
 				66556F8192F70568FAA0807C /* LGTVClient.swift */,
 				F75966A6C53E052479564B23 /* NetworkDiscovery.swift */,
+				7709BCD8023FA41A710B8544 /* TVBoxLink.swift */,
 				57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */,
 			);
 			path = Services;
@@ -232,14 +247,19 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				74012F9501BAE451489FAF42 /* AndroidTVIdentity.swift in Sources */,
+				74530E3242C79A9F6BA57254 /* AndroidTVProtocol.swift in Sources */,
+				0A995A1952C6FFA57086E67E /* AndroidTVRemote.swift in Sources */,
 				A5B44CB14635EE3962B61C84 /* DiscoveryView.swift in Sources */,
 				BB9C668423DE248249863DD0 /* HapticManager.swift in Sources */,
 				E56E1761134FD5BD5C8DAD47 /* LGTVClient.swift in Sources */,
 				29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */,
 				645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */,
 				E7C13E6D2D305DAFF4BF097C /* RemoteComponents.swift in Sources */,
+				03C4135A27C915C4EACA7B3E /* RemoteHelp.swift in Sources */,
 				A0250AEE0F917854372274CB /* RemoteView.swift in Sources */,
 				68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */,
+				B4E28A3EE6F94031B14AC51E /* TVBoxLink.swift in Sources */,
 				F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */,
 				1E8362808910CD771EE928EF /* TVKey.swift in Sources */,
 				4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */,
@@ -270,6 +290,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -288,6 +309,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

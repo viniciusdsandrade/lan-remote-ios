@@ -29,10 +29,11 @@ targets:
         CFBundleDisplayName: Lan Remote
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: "O LanRemote precisa acessar sua rede Wi-Fi local para descobrir e controlar sua TV LG NetCast diretamente."
+        NSLocalNetworkUsageDescription: "O LanRemote precisa acessar sua rede Wi-Fi local para descobrir e controlar sua TV LG NetCast e a TV Box que liga a TV."
         NSBonjourServices:
           - _roap._tcp
           - _udap._tcp
+          - _androidtvremote2._tcp
         UIRequiresPersistentWiFi: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
@@ -63,3 +64,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lanremote.ios.tests
         DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: YES   # lets the tests run signed, which the Keychain test needs
