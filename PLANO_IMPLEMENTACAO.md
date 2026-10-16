@@ -77,13 +77,19 @@ lan-remote-ios/
 │   ├── Views/
 │   │   ├── RemoteView.swift             # Tela principal com controles em zona de polegar
 │   │   ├── RemoteComponents.swift       # D-Pad circular, botões de comando e rockers
-│   │   ├── SettingsView.swift           # Configuração de IP, porta e pareamento de 6 dígitos
+│   │   ├── SettingsView.swift           # IP, porta, pareamento com a TV e com a TV Box
+│   │   ├── RemoteHelp.swift             # Catálogo do que cada botão faz, painel "segure para saber" e Guia dos botões
 │   │   └── DiscoveryView.swift          # Varredura visual de dispositivos na rede
+│   ├── Services/ (ligar a TV pela TV Box)
+│   │   ├── AndroidTVProtocol.swift      # Protobuf, DER/X.509, matemática do pareamento, MAC e Wake-on-LAN (puro)
+│   │   ├── AndroidTVIdentity.swift      # Certificado RSA do app gerado à mão e guardado no Keychain
+│   │   ├── AndroidTVRemote.swift        # TLS com a TV Box (6466/6467), pareamento, POWER, Wake-on-LAN unicast
+│   │   └── TVBoxLink.swift              # Modelo da TV Box, descoberta Bonjour e a sequência de ligar a TV
 │   └── Resources/
 │       ├── Assets.xcassets/             # Cores e ícone do aplicativo
 │       └── PrivacyInfo.xcprivacy        # Manifesto de privacidade exigido pela Apple
 └── LanRemoteTests/
-    └── LanRemoteTests.swift             # Testes unitários do cliente, parser XML e keys
+    └── LanRemoteTests.swift             # Testes unitários do cliente, parser XML, keys, protobuf, DER, Keychain, WoL
 ```
 
 ---
@@ -106,3 +112,11 @@ lan-remote-ios/
 5. **Fase 5: Automação CI/CD**
    - Workflow do GitHub Actions `.github/workflows/ios-ci.yml`.
    - Script de compilação determinístico `build.sh`.
+6. **Fase 6: Ligar a TV e botões didáticos** (paridade com o app para Mac)
+   - A TV não liga pela rede; o app acorda a TV Box (Android TV) por Wake-on-LAN unicast e aperta POWER
+     pelo protocolo do controle remoto do Android TV; ela liga a TV pelo HDMI-CEC (SIMPLINK).
+   - Estado `TVPowerState` (`Ligada`/`Desligada`/`Ligando…`), cartão com o botão **Ligar**, controle
+     esmaecido com a TV desligada, pareamento guiado com a TV Box em Ajustes.
+   - Cada botão com ícone e nome, agrupados por função; segurar mostra a explicação; Guia dos botões.
+   - Limites do iOS: sem broadcast (entitlement) e sem tabela ARP → MAC da TV Box pelos vizinhos do MAC
+     Bluetooth (Bonjour `bt=`) ou digitado; IP da TV Box deve ser fixo no roteador.
