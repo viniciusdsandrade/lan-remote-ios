@@ -1,0 +1,65 @@
+name: iOS CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-gates:
+    name: Security & Compliance Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Make Gate Scripts Executable
+        run: chmod +x scripts/ci/*.sh
+
+      - name: Gate ATS Compliance (OWASP MASVS-NETWORK)
+        run: ./scripts/ci/gate_ats.sh
+
+      - name: Gate Apple Privacy Manifest
+        run: ./scripts/ci/gate_privacy_manifest.sh
+
+      - name: Gate Sensitive Files & Certificates
+        run: ./scripts/ci/gate_sensitive_files.sh
+
+  build-ios:
+    name: Xcode Build & Test Preparation
+    needs: security-gates
+    runs-on: macos-15
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build LanRemote App (iOS Simulator)
+        run: |
+          xcodebuild \
+            -project LanRemote.xcodeproj \
+            -scheme LanRemote \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build for Testing (LanRemoteTests)
+        run: |
+          xcodebuild \
+            -project LanRemote.xcodeproj \
+            -scheme LanRemote \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing

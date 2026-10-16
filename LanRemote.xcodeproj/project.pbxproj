@@ -1,0 +1,506 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1E8362808910CD771EE928EF /* TVKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F6DA71A5704B15E50E1D5 /* TVKey.swift */; };
+		21CE4CADBF779D8A729CD475 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 04B357959760AD8680291990 /* Assets.xcassets */; };
+		29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */; };
+		4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */; };
+		645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75966A6C53E052479564B23 /* NetworkDiscovery.swift */; };
+		68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61301AED170777732BAB908 /* SettingsView.swift */; };
+		A0250AEE0F917854372274CB /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9D57750D07DCEF3A9DA278 /* RemoteView.swift */; };
+		A5B44CB14635EE3962B61C84 /* DiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */; };
+		AF75B11F2C5DE3AA004CF48B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7A15488CC40A2BD3650C5420 /* PrivacyInfo.xcprivacy */; };
+		BB9C668423DE248249863DD0 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85BE60C0B175A1AF4924F01 /* HapticManager.swift */; };
+		DA673DA31B3091ADA180C6D1 /* LanRemoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */; };
+		E56E1761134FD5BD5C8DAD47 /* LGTVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66556F8192F70568FAA0807C /* LGTVClient.swift */; };
+		E7C13E6D2D305DAFF4BF097C /* RemoteComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F4410D61B426F6A329E046 /* RemoteComponents.swift */; };
+		F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BA74FF2F673E1B4ABBC465 /* TVConfig.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F80CD85454CCDE3C34A85958 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BD9490AEC29C59B175E10EEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 77FC02FA310417078DFF7B5E;
+			remoteInfo = LanRemote;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		04B357959760AD8680291990 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		22F4410D61B426F6A329E046 /* RemoteComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteComponents.swift; sourceTree = "<group>"; };
+		230A773E379AD6A2A4D9CADD /* LanRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LanRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeButtonHandler.swift; sourceTree = "<group>"; };
+		66556F8192F70568FAA0807C /* LGTVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LGTVClient.swift; sourceTree = "<group>"; };
+		6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteTests.swift; sourceTree = "<group>"; };
+		78BA74FF2F673E1B4ABBC465 /* TVConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVConfig.swift; sourceTree = "<group>"; };
+		7A15488CC40A2BD3650C5420 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
+		83B8D4D9A46003273BEED882 /* LanRemoteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LanRemoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A61301AED170777732BAB908 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		F15F6DA71A5704B15E50E1D5 /* TVKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVKey.swift; sourceTree = "<group>"; };
+		F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteApp.swift; sourceTree = "<group>"; };
+		F75966A6C53E052479564B23 /* NetworkDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscovery.swift; sourceTree = "<group>"; };
+		F85BE60C0B175A1AF4924F01 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		FC9D57750D07DCEF3A9DA278 /* RemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1F5C4DF8379DD0196E274E04 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				04B357959760AD8680291990 /* Assets.xcassets */,
+				7A15488CC40A2BD3650C5420 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		380EDAD382E1A9327533611B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				230A773E379AD6A2A4D9CADD /* LanRemote.app */,
+				83B8D4D9A46003273BEED882 /* LanRemoteTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		51235C4E2DD66F3B3047F671 = {
+			isa = PBXGroup;
+			children = (
+				A4F00DC54DA7AA62F7E32AE9 /* LanRemote */,
+				C4613C83A1353FB1012433DB /* LanRemoteTests */,
+				380EDAD382E1A9327533611B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		69D5D823A568F6618CC796E2 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		6ADF513D960F558EB6717E53 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				78BA74FF2F673E1B4ABBC465 /* TVConfig.swift */,
+				F15F6DA71A5704B15E50E1D5 /* TVKey.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		99E03FDE2411535F759479A7 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				7A8D22CD7F26A00EFBF2EE96 /* DiscoveryView.swift */,
+				22F4410D61B426F6A329E046 /* RemoteComponents.swift */,
+				FC9D57750D07DCEF3A9DA278 /* RemoteView.swift */,
+				A61301AED170777732BAB908 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A4F00DC54DA7AA62F7E32AE9 /* LanRemote */ = {
+			isa = PBXGroup;
+			children = (
+				69D5D823A568F6618CC796E2 /* App */,
+				6ADF513D960F558EB6717E53 /* Model */,
+				1F5C4DF8379DD0196E274E04 /* Resources */,
+				D8B25CAC66BC26100EBB70AC /* Services */,
+				99E03FDE2411535F759479A7 /* Views */,
+			);
+			path = LanRemote;
+			sourceTree = "<group>";
+		};
+		C4613C83A1353FB1012433DB /* LanRemoteTests */ = {
+			isa = PBXGroup;
+			children = (
+				6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */,
+			);
+			path = LanRemoteTests;
+			sourceTree = "<group>";
+		};
+		D8B25CAC66BC26100EBB70AC /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				F85BE60C0B175A1AF4924F01 /* HapticManager.swift */,
+				66556F8192F70568FAA0807C /* LGTVClient.swift */,
+				F75966A6C53E052479564B23 /* NetworkDiscovery.swift */,
+				57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		77FC02FA310417078DFF7B5E /* LanRemote */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6DD45F1A33143F0D25B78DB0 /* Build configuration list for PBXNativeTarget "LanRemote" */;
+			buildPhases = (
+				CE024B9F21D4C04B46D619BA /* Sources */,
+				FB2A53E63309FAD4AF6DA6B8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LanRemote;
+			packageProductDependencies = (
+			);
+			productName = LanRemote;
+			productReference = 230A773E379AD6A2A4D9CADD /* LanRemote.app */;
+			productType = "com.apple.product-type.application";
+		};
+		97DCB4C7ED382B799504C6B6 /* LanRemoteTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 86489C5F0373C108D9333446 /* Build configuration list for PBXNativeTarget "LanRemoteTests" */;
+			buildPhases = (
+				CF6B3E9B602DBBBE2FB31D1A /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				491C6896AABCA8D20441A995 /* PBXTargetDependency */,
+			);
+			name = LanRemoteTests;
+			packageProductDependencies = (
+			);
+			productName = LanRemoteTests;
+			productReference = 83B8D4D9A46003273BEED882 /* LanRemoteTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BD9490AEC29C59B175E10EEE /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					77FC02FA310417078DFF7B5E = {
+						DevelopmentTeam = "";
+					};
+					97DCB4C7ED382B799504C6B6 = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = D3B29DE8E8C45288A9BB9B38 /* Build configuration list for PBXProject "LanRemote" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 51235C4E2DD66F3B3047F671;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 380EDAD382E1A9327533611B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				77FC02FA310417078DFF7B5E /* LanRemote */,
+				97DCB4C7ED382B799504C6B6 /* LanRemoteTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FB2A53E63309FAD4AF6DA6B8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				21CE4CADBF779D8A729CD475 /* Assets.xcassets in Resources */,
+				AF75B11F2C5DE3AA004CF48B /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CE024B9F21D4C04B46D619BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5B44CB14635EE3962B61C84 /* DiscoveryView.swift in Sources */,
+				BB9C668423DE248249863DD0 /* HapticManager.swift in Sources */,
+				E56E1761134FD5BD5C8DAD47 /* LGTVClient.swift in Sources */,
+				29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */,
+				645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */,
+				E7C13E6D2D305DAFF4BF097C /* RemoteComponents.swift in Sources */,
+				A0250AEE0F917854372274CB /* RemoteView.swift in Sources */,
+				68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */,
+				F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */,
+				1E8362808910CD771EE928EF /* TVKey.swift in Sources */,
+				4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CF6B3E9B602DBBBE2FB31D1A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA673DA31B3091ADA180C6D1 /* LanRemoteTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		491C6896AABCA8D20441A995 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 77FC02FA310417078DFF7B5E /* LanRemote */;
+			targetProxy = F80CD85454CCDE3C34A85958 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		152D5EC36F869D311AB42B23 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lanremote.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LanRemote.app/LanRemote";
+			};
+			name = Debug;
+		};
+		29814AC83B425ABD93253BE2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lanremote.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LanRemote.app/LanRemote";
+			};
+			name = Release;
+		};
+		35FEF56D134D1A76793CCB1D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = LanRemote/App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lanremote.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		76E8269D09BBE20FBDE518EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		86F0F5B80F442FF64CB48721 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = LanRemote/App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lanremote.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AF394DABB30ED81873F362C6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6DD45F1A33143F0D25B78DB0 /* Build configuration list for PBXNativeTarget "LanRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				86F0F5B80F442FF64CB48721 /* Debug */,
+				35FEF56D134D1A76793CCB1D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		86489C5F0373C108D9333446 /* Build configuration list for PBXNativeTarget "LanRemoteTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				152D5EC36F869D311AB42B23 /* Debug */,
+				29814AC83B425ABD93253BE2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D3B29DE8E8C45288A9BB9B38 /* Build configuration list for PBXProject "LanRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF394DABB30ED81873F362C6 /* Debug */,
+				76E8269D09BBE20FBDE518EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = BD9490AEC29C59B175E10EEE /* Project object */;
+}
