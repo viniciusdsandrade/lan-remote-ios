@@ -67,6 +67,9 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build-for-testing
 
+# (opcional) Regenera o ícone do app: mesmo controle do ícone do Mac, nas aparências padrão, escura e tinted
+swift scripts/make_app_icon.swift LanRemote/Resources/Assets.xcassets/AppIcon.appiconset
+
 # 4. Roda os testes num simulador (assinado ad-hoc: o teste do Keychain precisa de entitlements)
 xcodebuild test \
   -project LanRemote.xcodeproj \
