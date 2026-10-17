@@ -61,8 +61,9 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertEqual(config.port, 8080)
         XCTAssertEqual(config.protocolType, "roap")
         XCTAssertEqual(config.model, "47LN5700-SA_11")
-        XCTAssertEqual(config.pairingKey, "123456")
-        XCTAssertEqual(config.session, "123456789")
+        XCTAssertNil(config.pairingKey, "no pairing key ships with the app: it comes from the TV screen")
+        XCTAssertNil(config.session)
+        XCTAssertNil(config.mac)
     }
 
     func testTVConfigJSONCoding() throws {

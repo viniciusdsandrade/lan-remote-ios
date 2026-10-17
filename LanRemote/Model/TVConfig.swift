@@ -24,7 +24,8 @@ struct TVConfig: Codable, Equatable, Sendable {
     }
     
     static let defaultsKey = "com.lanremote.ios.config"
-    
+
+    /// Starting point before the first pairing: no key, session or MAC ship with the app.
     static var `default`: TVConfig {
         TVConfig(
             host: "192.168.1.100",
@@ -32,9 +33,9 @@ struct TVConfig: Codable, Equatable, Sendable {
             protocolType: "roap",
             model: "47LN5700-SA_11",
             name: "[TV][LG]47LN5700-SA",
-            pairingKey: "123456",
-            session: "123456789",
-            mac: "0a:03:0b:0c:0d:05"
+            pairingKey: nil,
+            session: nil,
+            mac: nil
         )
     }
     
