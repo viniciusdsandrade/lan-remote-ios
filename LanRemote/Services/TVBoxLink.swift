@@ -149,7 +149,7 @@ extension LGTVClient {
         powerOnStep = "Acordando a \(box.name) pelo Wi-Fi…"
         HapticManager.shared.buttonPress()
         do {
-            try await AndroidTVRemote.switchTVOn(host: box.host, wakeMACs: box.wakeMACs)
+            try await switchTVOnResolvingAddressIfNeeded(using: box)
         } catch AndroidTVError.notPaired {
             self.box?.paired = false
             self.box?.save()
@@ -158,7 +158,7 @@ extension LGTVClient {
         } catch AndroidTVError.asleep {
             failTurnOn(box.wakeMACs.isEmpty
                 ? "A TV Box está em repouso e o app não sabe o MAC do Wi-Fi dela para acordá-la. Informe em Ajustes."
-                : "A TV Box não acordou pelo Wi-Fi. Se o IP dela mudou, ligue a TV uma vez pelo controle e o app atualiza o endereço.")
+                : "A TV Box não acordou pelo Wi-Fi. Confira se o modo de energia dela está em 'Sempre conectado' e se o IP não mudou.")
             return
         } catch {
             failTurnOn("\(error.localizedDescription) Ela está ligada na tomada e no Wi-Fi?")
@@ -181,6 +181,29 @@ extension LGTVClient {
                    + "e o controle HDMI (CEC) na TV Box.")
     }
 
+    private func switchTVOnResolvingAddressIfNeeded(using box: AndroidTVBox) async throws {
+        do {
+            try await AndroidTVRemote.switchTVOn(host: box.host, wakeMACs: box.wakeMACs)
+        } catch let error where Self.isReachabilityError(error) {
+            await WakeOnLAN.send(macs: box.wakeMACs, to: box.host)
+            guard let moved = await TVBoxDiscovery.find(timeout: 2).first(where: { $0.name == box.name }),
+                  moved.host != box.host else { throw error }
+            var updated = self.box ?? box
+            updated.host = moved.host
+            updated.bluetoothMAC = moved.bluetoothMAC ?? updated.bluetoothMAC
+            self.box = updated
+            updated.save()
+            try await AndroidTVRemote.switchTVOn(host: moved.host, wakeMACs: updated.wakeMACs)
+        }
+    }
+
+    private static func isReachabilityError(_ error: Error) -> Bool {
+        switch error {
+        case AndroidTVError.connection, AndroidTVError.timeout, AndroidTVError.asleep: return true
+        default: return false
+        }
+    }
+
     private func failTurnOn(_ message: String) {
         powerState = .off
         powerOnStep = ""
@@ -188,10 +211,10 @@ extension LGTVClient {
         HapticManager.shared.error()
     }
 
-    /// While the TV is on the box is awake and findable: keep its address and Bluetooth MAC fresh,
-    /// so a DHCP change doesn't leave the phone waking the wrong address later.
+    /// Keeps the box's IP address, Bluetooth MAC and local ARP cache entry fresh whenever the box is
+    /// reachable on the LAN (while the TV is on, or in "Sempre conectado" standby mode).
     func refreshBoxAddressIfNeeded() {
-        guard let box, box.paired, powerState == .on,
+        guard let box, box.paired,
               Date().timeIntervalSince(lastBoxRefresh) > 300 else { return }
         lastBoxRefresh = Date()
         Task {

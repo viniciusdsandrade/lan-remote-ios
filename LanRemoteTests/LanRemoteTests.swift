@@ -353,6 +353,13 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertNil(WakeOnLAN.magicPacket(mac: "nope"))
     }
 
+    func testWakeOnLANTargetsIncludeUnicastAndSubnetBroadcast() {
+        XCTAssertEqual(WakeOnLAN.targets(for: "192.0.2.101"),
+                       ["192.0.2.101", "192.0.2.255", "255.255.255.255"])
+        XCTAssertEqual(WakeOnLAN.targets(for: "fe80::1"),
+                       ["fe80::1", "255.255.255.255"])
+    }
+
     // MARK: - TV Box model
 
     func testAndroidTVBoxWakeMACs() {

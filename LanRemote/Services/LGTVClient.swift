@@ -243,6 +243,7 @@ final class LGTVClient: ObservableObject {
                 }
             } catch {
                 markUnreachable()
+                refreshBoxAddressIfNeeded()
                 return   // no point asking for the channel as well
             }
         }
