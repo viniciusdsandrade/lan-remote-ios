@@ -324,13 +324,14 @@ enum AndroidTVRemote {
     /// "One Touch Play", which turns the TV on and selects the box's input. (KEYCODE_TV_POWER would
     /// be the direct way, but the Xiaomi box ignores it, and KEYCODE_WAKEUP doesn't wake it.)
     ///
-    /// A few seconds after the TV goes to standby the box follows it into deep sleep and closes the
+    /// A few seconds after the TV goes to standby the box follows it into sleep and closes the
     /// remote service. Wake-on-LAN brings its network back for a few seconds (the port answers in
-    /// about 1 s), which is enough to press POWER. The magic packets go straight to the box's
-    /// address: iOS only lets apps broadcast with a special entitlement, and unicast works.
+    /// about 1 s), which is enough to press POWER. Magic packets are re-sent while polling so that
+    /// even if the first packet only triggers ARP resolution on a cold ARP cache, the next packet
+    /// goes straight through once the box answers ARP in "Sempre conectado" mode.
     static func switchTVOn(host: String, wakeMACs: [String]) async throws {
         await WakeOnLAN.send(macs: wakeMACs, to: host)
-        guard await waitUntilReachable(host, timeout: wakeMACs.isEmpty ? 4 : 6) else {
+        guard await waitUntilReachable(host, wakeMACs: wakeMACs, timeout: wakeMACs.isEmpty ? 5 : 10) else {
             throw AndroidTVError.asleep
         }
         if try await press(codes: [], host: host) == true {
@@ -339,16 +340,20 @@ enum AndroidTVRemote {
             try await press([.power], host: host)
             try await Task.sleep(nanoseconds: 3_000_000_000)
             await WakeOnLAN.send(macs: wakeMACs, to: host)
-            _ = await waitUntilReachable(host, timeout: 12)
+            _ = await waitUntilReachable(host, wakeMACs: wakeMACs, timeout: 12)
         }
         try await press([.power], host: host)
     }
 
-    /// Polls the remote port until the box accepts TCP connections.
-    static func waitUntilReachable(_ host: String, timeout: TimeInterval) async -> Bool {
+    /// Polls the remote port until the box accepts TCP connections, re-sending Wake-on-LAN on each
+    /// miss so a cold ARP cache that resolves after the first probe still receives the magic packet.
+    static func waitUntilReachable(_ host: String, wakeMACs: [String] = [], timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if await accepts(host, port: 6466, within: 0.6) { return true }
+            if !wakeMACs.isEmpty {
+                await WakeOnLAN.send(macs: wakeMACs, to: host)
+            }
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
         return false
@@ -387,12 +392,45 @@ enum AndroidTVRemote {
 // MARK: - Wake-on-LAN over UDP
 
 extension WakeOnLAN {
-    /// Sends one magic packet per MAC to `host`, on both usual ports. Unicast only (see above).
+    /// Sends magic packets for each MAC to `host` (unicast + best-effort subnet/limited broadcast).
     static func send(macs: [String], to host: String) async {
-        for mac in macs {
-            guard let packet = magicPacket(mac: mac) else { continue }
+        let packets = macs.compactMap { magicPacket(mac: $0) }
+        guard !packets.isEmpty else { return }
+        sendPOSIX(packets: packets, host: host)
+        for packet in packets {
             for port: UInt16 in [9, 7] {
                 await sendUDP(packet, host: host, port: port)
+            }
+        }
+    }
+
+    /// Best-effort BSD UDP send to unicast, /24 broadcast and 255.255.255.255. On platforms or
+    /// entitlements where broadcast is restricted, the kernel ignores those targets and unicast still runs.
+    private static func sendPOSIX(packets: [Data], host: String) {
+        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard fd >= 0 else { return }
+        defer { Darwin.close(fd) }
+        var yes: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, socklen_t(MemoryLayout<Int32>.size))
+
+        let targets = Self.targets(for: host)
+        for packet in packets {
+            for target in targets {
+                for port: UInt16 in [9, 7] {
+                    var destination = sockaddr_in()
+                    destination.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+                    destination.sin_family = sa_family_t(AF_INET)
+                    destination.sin_port = port.bigEndian
+                    guard inet_pton(AF_INET, target, &destination.sin_addr) == 1 else { continue }
+                    packet.withUnsafeBytes { bytes in
+                        withUnsafePointer(to: &destination) { pointer in
+                            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                                _ = sendto(fd, bytes.baseAddress, bytes.count, 0, $0,
+                                           socklen_t(MemoryLayout<sockaddr_in>.size))
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -235,9 +235,10 @@ struct SettingsView: View {
             Text("Se a TV não ligar, confira:")
                 .fontWeight(.semibold)
             Text("• Na TV LG: SIMPLINK ligado (botão SIMPLINK do app, ou Configurações › Opções › SIMPLINK).")
-            Text("• Na TV Box: Configurações › Sistema (ou Preferências do dispositivo) › Entradas › HDMI-CEC ativado.")
-            Text("• O iPhone não enxerga o MAC do Wi-Fi da TV Box; o app tenta os endereços vizinhos ao do Bluetooth dela. Se não acordar, digite o MAC (está em Configurações › Sistema › Sobre › Status na TV Box).")
-            Text("• Reserve o IP da TV Box no roteador: dormindo, ela só acorda pelo último endereço conhecido.")
+            Text("• Na TV Box (HDMI-CEC): Configurações › Tela e som (ou Sistema › Entradas) › HDMI-CEC ativado, e 'Desligar automaticamente' desativado.")
+            Text("• Na TV Box (Energia): Configurações › Sistema › Energia e alimentação › Modo de energia em 'Consumo elevado (Sempre conectado)' e timer de desligamento em 'Nunca', para ela não sair do Wi-Fi após horas em espera.")
+            Text("• O iPhone não enxerga o MAC do Wi-Fi da TV Box; o app tenta os endereços vizinhos ao do Bluetooth dela. Se não acordar, digite o MAC (Configurações › Sistema › Sobre › Status na TV Box).")
+            Text("• Reserve o IP da TV Box no roteador para o endereço não mudar.")
         }
         .font(.footnote)
     }

@@ -102,9 +102,9 @@ As Smart TVs LG de 2012–2013 utilizam o protocolo **ROAP / UDAP** sobre HTTP n
 A TV não liga pela rede (em standby o controlador de rede dela desliga; Wake-on-LAN não tem efeito).
 O caminho é a **TV Box Xiaomi** (Android TV / Google TV) ligada no HDMI, que acorda a TV pelo CEC:
 
-1. O app manda **Wake-on-LAN** para o endereço da TV Box. Ela também dorme fundo, mas acorda a rede
-   por alguns segundos (a porta do controle responde em ~1 s). Os pacotes vão em **unicast** para o
-   último IP conhecido: broadcast no iOS exige um entitlement especial da Apple, e unicast funciona.
+1. O app manda **Wake-on-LAN** para a TV Box (unicast + broadcast de sub-rede, reenviando a cada ciclo
+   de sondagem para que mesmo com o cache ARP frio a resolução ARP ocorra na primeira tentativa e o
+   pacote mágico chegue em seguida). A rede da TV Box responde na porta do controle em ~1–2 s.
 2. Nessa janela o app aperta **POWER** pelo protocolo do controle remoto do Android TV (o mesmo do app
    Google TV: portas 6466/6467, TLS com certificado próprio, mensagens protobuf).
 3. Ao acordar, a TV Box manda **One Touch Play** pelo HDMI-CEC: a TV liga, já na entrada dela. A imagem
@@ -115,17 +115,20 @@ Uma vez só, em **Ajustes › Ligar a TV pelo app**: com a TV ligada na entrada 
 guarda no Keychain (`AndroidTVIdentity.swift`); a TV Box passa a reconhecê-lo. Requisitos:
 
 - **SIMPLINK ligado na TV** (botão SIMPLINK do app → "SIMPLINK Ligado"). Sem ele a TV ignora o CEC.
-- **HDMI-CEC ativo na TV Box** (Configurações › Sistema › Entradas).
+- **HDMI-CEC na TV Box** (Configurações › Tela e som ou Sistema › Entradas › HDMI-CEC): mantenha o
+  **HDMI-CEC ativado** e desative **"Desligar automaticamente"**.
+- **Modo de energia na TV Box** (Configurações › Sistema › Energia e alimentação): selecione
+  **Modo de consumo elevado (Sempre conectado)** e timer de desligamento em **Nunca**, para a TV Box
+  não desconectar do Wi-Fi nem parar de responder ARP após horas em repouso.
 - **MAC do Wi-Fi da TV Box**: o iPhone não lê a tabela ARP, então o app tenta os endereços vizinhos ao
   MAC Bluetooth anunciado no Bonjour (`bt=`; os dois costumam ser consecutivos). Se não acordar, digite
   o MAC em Ajustes (na TV Box: Configurações › Sistema › Sobre › Status).
-- **IP fixo para a TV Box** (reserva DHCP no roteador): dormindo, ela só acorda pelo último endereço
-  conhecido. Enquanto a TV está ligada o app atualiza esse endereço pelo Bonjour a cada 5 min.
+- **IP fixo para a TV Box** (reserva DHCP no roteador): o app também atualiza o endereço pelo Bonjour
+  automaticamente a cada 5 min.
 
 Não adianta usar `KEYCODE_TV_POWER` (177) nem `KEYCODE_WAKEUP` (224): a TV Box Xiaomi ignora os dois.
-A sequência acima foi validada de ponta a ponta no app para Mac do projeto irmão (`lan-remote-mac`):
-TV em standby e TV Box em repouso profundo → TV ligada e respondendo em ~42 s. No iPhone, o que falta
-validar em aparelho real é o pareamento e o Wake-on-LAN saindo do iOS.
+A sequência acima foi validada de ponta a ponta tanto no app para Mac (`lan-remote-mac`) quanto no
+app para iPhone (`LanRemote`): TV em standby e TV Box em repouso → TV ligada e respondendo em ~43 s.
 
 ---
 

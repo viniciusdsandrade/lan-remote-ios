@@ -331,6 +331,26 @@ enum WakeOnLAN {
         guard let address = MACAddress.bytes(mac) else { return nil }
         return Data(repeating: 0xFF, count: 6) + Data((0..<16).flatMap { _ in address })
     }
+
+    /// Unicast address plus the /24 subnet broadcast and limited broadcast addresses.
+    static func targets(for host: String) -> [String] {
+        var result: [String] = []
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            result.append(trimmed)
+        }
+        let octets = trimmed.split(separator: ".")
+        if octets.count == 4, octets.allSatisfy({ UInt8($0) != nil }) {
+            let subnetBroadcast = octets.prefix(3).joined(separator: ".") + ".255"
+            if !result.contains(subnetBroadcast) {
+                result.append(subnetBroadcast)
+            }
+        }
+        if !result.contains("255.255.255.255") {
+            result.append("255.255.255.255")
+        }
+        return result
+    }
 }
 
 extension Data {
