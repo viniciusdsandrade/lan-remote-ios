@@ -198,7 +198,19 @@ final class AndroidTVPairing {
         try await expect(31)                                // configuration_ack: code is on screen now
     }
 
+    /// Whether `code` passes its own check digit, without sending anything to the box.
+    func accepts(_ code: String) -> Bool {
+        (try? secret(for: code)) != nil
+    }
+
     func finish(code: String) async throws {
+        let secret = try secret(for: code)
+        try await send { $0.message(40) { $0.bytes(1, secret) } }   // pairing_secret
+        try await expect(41)                                         // secret_ack
+        cancel()
+    }
+
+    private func secret(for code: String) throws -> Data {
         guard let parsed = AndroidTVPairingMath.parse(code: code) else { throw AndroidTVError.wrongCode }
         guard let serverCertificate = channel?.serverCertificate else { throw AndroidTVError.connection("canal fechado") }
         let client = try AndroidTVIdentity.rsaComponents(try AndroidTVIdentity.certificate(of: identity))
@@ -206,9 +218,7 @@ final class AndroidTVPairing {
         let secret = AndroidTVPairingMath.secret(client: client, server: server, nonce: parsed.nonce)
         // The first byte of the code is a checksum of the rest: catches typos before the box does.
         guard secret.first == parsed.checksum else { throw AndroidTVError.wrongCode }
-        try await send { $0.message(40) { $0.bytes(1, secret) } }   // pairing_secret
-        try await expect(41)                                         // secret_ack
-        cancel()
+        return secret
     }
 
     func cancel() {

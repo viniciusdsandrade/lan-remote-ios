@@ -261,6 +261,20 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertNotEqual(a, swapped)
     }
 
+    func testScreenTextHexCodesCoverOCRMixUps() {
+        // The code read off the TV: "O" for 0, "B" for 8; other lines are not codes.
+        let text = ScreenText(lines: ["lan remote (iphone)", "4f 2a 9c", "8e5434", "o1 b2 c3", "abcdefg"])
+        let codes = text.hexCodes()
+        XCTAssertTrue(codes.contains("4F2A9C"))
+        XCTAssertTrue(codes.contains("8E5434"))
+        XCTAssertTrue(codes.contains("BE5434"), "8 can be a misread B")
+        XCTAssertTrue(codes.contains("01B2C3"), "O can be a misread 0")
+        XCTAssertTrue(codes.contains("0182C3"), "B can be a misread 8")
+        XCTAssertFalse(codes.contains { $0.count != 6 || !$0.allSatisfy(\.isHexDigit) })
+        XCTAssertEqual(Set(codes).count, codes.count, "no duplicates")
+        XCTAssertEqual(ScreenText(lines: ["nothing here"]).hexCodes(), [])
+    }
+
     // MARK: - Android TV protocol: DER and the client certificate
 
     func testDERPrimitives() {

@@ -77,9 +77,10 @@ enum AndroidTVIdentity {
         var serial = Data(count: 16)
         serial.withUnsafeMutableBytes { _ = SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let now = Date()
+        // The pairing lasts as long as this certificate: 20 years (still a UTCTime, before 2050).
         let der = try X509.selfSigned(commonName: commonName, publicKeyPKCS1: publicKeyDER, serial: serial,
                                       notBefore: now.addingTimeInterval(-86_400),
-                                      notAfter: now.addingTimeInterval(3650 * 86_400)) { tbs in
+                                      notAfter: now.addingTimeInterval(7300 * 86_400)) { tbs in
             guard let signature = SecKeyCreateSignature(privateKey, .rsaSignatureMessagePKCS1v15SHA256,
                                                         tbs as CFData, &error) as Data? else {
                 throw AndroidTVError.certificate("não consegui assinar o certificado")

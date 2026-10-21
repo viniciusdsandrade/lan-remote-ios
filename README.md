@@ -1,6 +1,6 @@
 # Lan Remote iOS
 
-Aplicativo nativo para **iPhone** e **iPad** desenvolvido em **SwiftUI** para controle remoto de televisores **LG NetCast** (especialmente série LN5700 como xxLN5700, modelos 2012-2013) operando **100% na rede local (LAN)**.
+Aplicativo nativo para **iPhone** e **iPad** desenvolvido em **SwiftUI** para controle remoto de televisores **LG NetCast** (série LN5700, modelos 2012-2013) operando **100% na rede local (LAN)**.
 
 ---
 
@@ -111,8 +111,13 @@ O caminho é a **TV Box da sala** (Android TV / Google TV) ligada no HDMI, que a
    volta em segundos; a rede da TV, em ~40–55 s, e aí o controle volta a responder.
 
 Uma vez só, em **Ajustes › Ligar a TV pelo app**: com a TV ligada na entrada da TV Box, toque em
-**Parear** e digite o código de 6 caracteres que aparece na tela. O app gera um certificado RSA e o
-guarda no Keychain (`AndroidTVIdentity.swift`); a TV Box passa a reconhecê-lo. Requisitos:
+**Parear**. A TV Box mostra um código de 6 caracteres na TV e o app o lê sozinho: fotografa a tela da
+TV (consulta `screen_image` do ROAP), lê o código por OCR (Vision, `ScreenText.swift`) e confere o
+dígito verificador dele antes de enviar, o que separa as confusões do OCR (0/D, 8/B). Se não
+conseguir, o campo para digitar fica na tela. O app gera um certificado RSA, válido por 20 anos, e o
+guarda no Keychain (`AndroidTVIdentity.swift`); a TV Box passa a reconhecê-lo, e o pareamento dura
+enquanto esse certificado existir (ele some ao desinstalar o app ou em **Esquecer**; um
+certificado novo exige parear de novo). Requisitos:
 
 - **SIMPLINK ligado na TV** (botão SIMPLINK do app → "SIMPLINK Ligado"). Sem ele a TV ignora o CEC.
 - **HDMI-CEC na TV Box** (Configurações › Tela e som ou Sistema › Entradas › HDMI-CEC): mantenha o
@@ -129,6 +134,10 @@ guarda no Keychain (`AndroidTVIdentity.swift`); a TV Box passa a reconhecê-lo. 
 Não adianta usar `KEYCODE_TV_POWER` (177) nem `KEYCODE_WAKEUP` (224): a TV Box da sala ignora os dois.
 A sequência acima foi validada de ponta a ponta tanto no app para Mac (`lan-remote-mac`) quanto no
 app para iPhone (`LanRemote`): TV em standby e TV Box em repouso → TV ligada e respondendo em ~43 s.
+
+Só o app para Mac tem uma reserva quando a TV Box sai do Wi-Fi: o PS5. Acordado pela rede o PS5 não
+manda o One Touch Play, então o app do Mac o reinicia por uma sessão do Uso remoto, o que não existe
+no iPhone. Se o botão Ligar não achar a TV Box, confira o modo de energia dela (acima) e o Wi-Fi.
 
 ---
 

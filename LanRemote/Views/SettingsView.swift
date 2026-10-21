@@ -273,7 +273,7 @@ struct SettingsView: View {
             }
         } else {
             stepText(1, "Ligue a TV (só desta vez) e coloque na entrada HDMI da TV Box.")
-            stepText(2, "Toque em Parear: um código de 6 caracteres aparece na tela da TV.")
+            stepText(2, "Toque em Parear: um código de 6 caracteres aparece na tela da TV, e o app o lê sozinho.")
             ForEach(client.discoveredBoxes) { candidate in
                 HStack(spacing: 12) {
                     Image(systemName: "tv.and.mediabox")
@@ -297,7 +297,7 @@ struct SettingsView: View {
 
     private var codeEntry: some View {
         Group {
-            stepText(3, "Digite o código que apareceu na tela da TV:")
+            stepText(3, "Lendo o código na tela da TV… Se o app não conseguir, digite o código que apareceu nela:")
             HStack {
                 TextField("Ex.: 4F2A9C", text: $boxCodeInput)
                     .font(.system(size: 20, weight: .semibold, design: .monospaced))

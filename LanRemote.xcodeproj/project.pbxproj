@@ -25,6 +25,7 @@
 		DA673DA31B3091ADA180C6D1 /* LanRemoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */; };
 		E56E1761134FD5BD5C8DAD47 /* LGTVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66556F8192F70568FAA0807C /* LGTVClient.swift */; };
 		E7C13E6D2D305DAFF4BF097C /* RemoteComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F4410D61B426F6A329E046 /* RemoteComponents.swift */; };
+		E8AA8B9F1FEA57B6938B6795 /* ScreenText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CDC46AC94BB061B7948515 /* ScreenText.swift */; };
 		F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78BA74FF2F673E1B4ABBC465 /* TVConfig.swift */; };
 /* End PBXBuildFile section */
 
@@ -55,6 +56,7 @@
 		83B8D4D9A46003273BEED882 /* LanRemoteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LanRemoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVIdentity.swift; sourceTree = "<group>"; };
 		A61301AED170777732BAB908 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B7CDC46AC94BB061B7948515 /* ScreenText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenText.swift; sourceTree = "<group>"; };
 		F15F6DA71A5704B15E50E1D5 /* TVKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVKey.swift; sourceTree = "<group>"; };
 		F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteApp.swift; sourceTree = "<group>"; };
 		F75966A6C53E052479564B23 /* NetworkDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscovery.swift; sourceTree = "<group>"; };
@@ -148,6 +150,7 @@
 				F85BE60C0B175A1AF4924F01 /* HapticManager.swift */,
 				66556F8192F70568FAA0807C /* LGTVClient.swift */,
 				F75966A6C53E052479564B23 /* NetworkDiscovery.swift */,
+				B7CDC46AC94BB061B7948515 /* ScreenText.swift */,
 				7709BCD8023FA41A710B8544 /* TVBoxLink.swift */,
 				57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */,
 			);
@@ -258,6 +261,7 @@
 				E7C13E6D2D305DAFF4BF097C /* RemoteComponents.swift in Sources */,
 				03C4135A27C915C4EACA7B3E /* RemoteHelp.swift in Sources */,
 				A0250AEE0F917854372274CB /* RemoteView.swift in Sources */,
+				E8AA8B9F1FEA57B6938B6795 /* ScreenText.swift in Sources */,
 				68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */,
 				B4E28A3EE6F94031B14AC51E /* TVBoxLink.swift in Sources */,
 				F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */,
