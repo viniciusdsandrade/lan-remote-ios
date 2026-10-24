@@ -59,6 +59,21 @@ final class LGTVClient: ObservableObject {
         }
     }
 
+    // MARK: - TV Relocation (DHCP Migration)
+
+    /// Attempts to relocate the TV when its IP address changed due to DHCP lease renewal.
+    @discardableResult
+    func relocateTVIfNeeded() async -> Bool {
+        guard let newHost = await LGTVDiscovery.locate(matching: config),
+              newHost != config.host else {
+            return false
+        }
+        NSLog("LG TV relocated from %@ to %@", config.host, newHost)
+        self.config.host = newHost
+        saveConfig()
+        return true
+    }
+
     // MARK: - Polling
 
     func startPolling() {
@@ -194,6 +209,13 @@ final class LGTVClient: ObservableObject {
                 }
             }
         } catch {
+            if retryCount == 0 {
+                let relocated = await relocateTVIfNeeded()
+                if relocated {
+                    await performSendKey(code: code, label: label, retryCount: 1)
+                    return
+                }
+            }
             markUnreachable()
         }
     }
@@ -221,7 +243,10 @@ final class LGTVClient: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        await performStatusCheck(allowRelocate: true)
+    }
 
+    private func performStatusCheck(allowRelocate: Bool) async {
         let session = config.session ?? ""
         let basePath = config.protocolType == "udap" ? "/udap/api/data" : "/roap/api/data"
         let volPath = "\(basePath)?target=volume_info&session=\(session)"
@@ -249,9 +274,20 @@ final class LGTVClient: ObservableObject {
                         }
                     }
                 } else if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 401 {
-                    _ = await self.pairWithSavedKey()
+                    let reAuth = await self.pairWithSavedKey()
+                    if reAuth {
+                        await self.performStatusCheck(allowRelocate: false)
+                        return
+                    }
                 }
             } catch {
+                if allowRelocate {
+                    let relocated = await relocateTVIfNeeded()
+                    if relocated {
+                        await performStatusCheck(allowRelocate: false)
+                        return
+                    }
+                }
                 markUnreachable()
                 refreshBoxAddressIfNeeded()
                 return   // no point asking for the channel as well
@@ -341,7 +377,9 @@ final class LGTVClient: ObservableObject {
                     self.saveConfig()
                     self.powerState = .on
                     HapticManager.shared.success()
-                    await self.refreshStatus()
+                    if !self.isRefreshing {
+                        await self.refreshStatus()
+                    }
                     return (true, "Pareamento concluído com sucesso!")
                 } else if httpResp.statusCode == 401 {
                     HapticManager.shared.error()

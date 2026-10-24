@@ -197,6 +197,13 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertEqual(tv.id, "192.0.2.100:8080")
         XCTAssertEqual(tv.ip, "192.0.2.100")
         XCTAssertEqual(tv.port, 8080)
+        XCTAssertNil(tv.uuid)
+    }
+
+    func testDetectSubnetPrefix() {
+        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "192.168.1.17"), "192.168.1")
+        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "10.0.0.5"), "10.0.0")
+        XCTAssertNil(LGTVDiscovery.detectSubnetPrefix(from: "invalid"))
     }
 
     // MARK: - Android TV protocol: protobuf

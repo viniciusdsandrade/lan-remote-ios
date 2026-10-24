@@ -167,7 +167,7 @@ extension LGTVClient {
 
         // The picture comes back in seconds; the NetCast network takes almost a minute more.
         powerOnStep = "A TV está acendendo. O controle volta a responder em até 1 minuto…"
-        let deadline = Date().addingTimeInterval(90)
+        let deadline = Date().addingTimeInterval(150)
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             await refreshStatus()

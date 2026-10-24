@@ -152,9 +152,15 @@ struct SettingsView: View {
                 DiscoveryView(onSelect: { tv in
                     hostInput = tv.ip
                     portInput = String(tv.port)
+                    client.config.model = tv.model
+                    client.config.name = tv.name
+                    client.config.protocolType = tv.protocolType
                     saveSettings()
                     showDiscovery = false
                 })
+            }
+            .onChange(of: client.config.host) { _, newHost in
+                hostInput = newHost
             }
             .alert(isPresented: $showAlert) {
                 Alert(
