@@ -80,6 +80,34 @@ xcodebuild test \
 
 ---
 
+## 📲 Instalar no iPhone
+
+É um app pessoal, instalado direto pelo Mac (sem App Store nem TestFlight). Com uma conta Apple
+gratuita a assinatura vale **7 dias**: depois disso o iPhone se recusa a abrir o app ("perfil não
+confiável") até ele ser instalado de novo.
+
+1. No Xcode, entre com o seu Apple ID (Settings > Accounts).
+2. Pareie o iPhone com o Mac uma vez pelo cabo ("Confiar neste computador") e ligue o Modo de
+   Desenvolvedor no iPhone (Ajustes > Privacidade e Segurança).
+3. Prepare a configuração local (time de assinatura e iPhone, guardados em
+   `~/.config/lan-remote/ios.env`, fora do repositório):
+
+   ```bash
+   ./scripts/preparar_ios_env.sh
+   ```
+
+4. Instale (e repita a cada 7 dias):
+
+   ```bash
+   ./scripts/instalar_iphone.sh              # instala e abre o app
+   ./scripts/instalar_iphone.sh --sem-abrir  # só instala
+   ```
+
+O script diz até quando a assinatura vale. Na primeira instalação, confie no desenvolvedor no iPhone
+(Ajustes > Geral > Gerenciamento de VPN e Dispositivo). Se o iPhone já tem o app com outro identificador
+(uma instalação antiga), ponha `BUNDLE_ID=` com ele em `~/.config/lan-remote/ios.env`: instalar por cima
+mantém os pareamentos com a TV e a TV Box, que somem se o app for desinstalado.
+
 ## 📡 Protocolo de Rede (ROAP vs UDAP)
 
 As Smart TVs LG de 2012–2013 utilizam o protocolo **ROAP / UDAP** sobre HTTP na porta `8080`:
