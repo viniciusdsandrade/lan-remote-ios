@@ -31,6 +31,11 @@ enum LGTVDiscovery {
     static let bcastPort: UInt16 = 1990
     static let defaultPort: Int = 8080
 
+    /// Search for the TV's DLNA renderer, a server of its own on the TV. Every answer to a UDAP search
+    /// (udap:rootservice) puts LG's discovery popup on screen instead: "model_XX", a phone pointing at
+    /// the TV and a "Pairing Key" field (UDAP 2.0 spec, "Host screen after discovery response").
+    static let dlnaSearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSER-AGENT: iOS/1.0 UPnP/1.1 lg_roap_control/1.0.0\r\n\r\n"
+
     /// Quick probe to check if a TV answers HTTP on `host:port`.
     static func probeHost(_ host: String, port: Int = defaultPort, timeout: TimeInterval = 1.0) async -> Bool {
         guard let url = URL(string: "http://\(host):\(port)/roap/api/data?target=volume_info") else { return false }
@@ -47,7 +52,8 @@ enum LGTVDiscovery {
         }
     }
 
-    /// Locates the LG TV matching `config` (by current IP, SSDP/B-SEARCH discovery, or fast subnet sweep).
+    /// Locates the LG TV matching `config` (by current IP, DLNA discovery, or fast subnet sweep).
+    /// It runs by itself whenever the TV stops answering, so it never uses the UDAP search.
     static func locate(matching config: TVConfig) async -> String? {
         let port = config.port > 0 ? config.port : defaultPort
 
@@ -56,9 +62,21 @@ enum LGTVDiscovery {
             return config.host
         }
 
-        // 2. SSDP M-SEARCH / B-SEARCH
-        let found = await search(timeout: 2.0)
+        // 2. SSDP DLNA M-SEARCH
+        if let host = match(config, in: await search(timeout: 2.0)) {
+            return host
+        }
 
+        // 3. Fallback subnet sweep (if SSDP was blocked by Wi-Fi AP isolation or multicast filter)
+        let prefix = detectSubnetPrefix(from: config.host) ?? "192.168.1"
+        if let sweepMatch = await quickSubnetSweep(prefix: prefix, port: port) {
+            return sweepMatch
+        }
+
+        return nil
+    }
+
+    private static func match(_ config: TVConfig, in found: [DiscoveredTV]) -> String? {
         // Match by Model or Name
         if let model = config.model, !model.isEmpty,
            let match = found.first(where: { $0.model.localizedCaseInsensitiveContains(model) || model.localizedCaseInsensitiveContains($0.model) }) {
@@ -74,24 +92,19 @@ enum LGTVDiscovery {
             return found[0].ip
         }
 
-        // 3. Fallback subnet sweep (if SSDP was blocked by Wi-Fi AP isolation or multicast filter)
-        let prefix = detectSubnetPrefix(from: config.host) ?? "192.168.1"
-        if let sweepMatch = await quickSubnetSweep(prefix: prefix, port: port) {
-            return sweepMatch
-        }
-
         return nil
     }
 
-    /// Searches for LG NetCast TVs on the local network via SSDP multicast and broadcast.
-    static func search(timeout: TimeInterval = 2.0) async -> [DiscoveredTV] {
+    /// Searches for LG NetCast TVs on the local network via SSDP: the DLNA renderer search, or with
+    /// `udap` the UDAP search in multicast and broadcast (which shows the discovery popup on the TV).
+    static func search(timeout: TimeInterval = 2.0, udap: Bool = false) async -> [DiscoveredTV] {
         let candidateIPs = await Task.detached(priority: .userInitiated) {
-            discoverCandidates(timeout: timeout)
+            discoverCandidates(timeout: timeout, udap: udap)
         }.value
 
         var results: [DiscoveredTV] = []
         for ip in candidateIPs {
-            if let tv = await inspectTV(host: ip) {
+            if let tv = await inspectTV(host: ip, udap: udap) {
                 if !results.contains(where: { $0.ip == tv.ip }) {
                     results.append(tv)
                 }
@@ -131,8 +144,8 @@ enum LGTVDiscovery {
         return nil
     }
 
-    /// Sends SSDP M-SEARCH and B-SEARCH and collects sender IP addresses.
-    private static func discoverCandidates(timeout: TimeInterval) -> [String] {
+    /// Sends the SSDP searches (DLNA, or with `udap` M-SEARCH and B-SEARCH) and collects sender IP addresses.
+    private static func discoverCandidates(timeout: TimeInterval, udap: Bool) -> [String] {
         let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { return [] }
         defer { Darwin.close(fd) }
@@ -142,13 +155,14 @@ enum LGTVDiscovery {
         var ttl: u_char = 2
         setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(MemoryLayout<u_char>.size))
 
-        let msearchRootservice = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
-        let msearchMediaRenderer = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
-        let bsearchRootservice = "B-SEARCH * HTTP/1.1\r\nHOST: 255.255.255.255:1990\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
-
-        sendUDP(payload: msearchRootservice, to: "239.255.255.250", port: ssdpPort, fd: fd)
-        sendUDP(payload: msearchMediaRenderer, to: "239.255.255.250", port: ssdpPort, fd: fd)
-        sendUDP(payload: bsearchRootservice, to: "255.255.255.255", port: bcastPort, fd: fd)
+        if udap {
+            let msearchRootservice = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
+            let bsearchRootservice = "B-SEARCH * HTTP/1.1\r\nHOST: 255.255.255.255:1990\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
+            sendUDP(payload: msearchRootservice, to: "239.255.255.250", port: ssdpPort, fd: fd)
+            sendUDP(payload: bsearchRootservice, to: "255.255.255.255", port: bcastPort, fd: fd)
+        } else {
+            sendUDP(payload: dlnaSearch, to: "239.255.255.250", port: ssdpPort, fd: fd)
+        }
 
         var foundIPs = Set<String>()
         var buffer = [UInt8](repeating: 0, count: 2048)
@@ -204,10 +218,10 @@ enum LGTVDiscovery {
         }
     }
 
-    /// Fetches details from rootservice.xml or volume_info on the candidate IP.
-    static func inspectTV(host: String, port: Int = defaultPort) async -> DiscoveredTV? {
+    /// Fetches details from rootservice.xml (with `udap`) or volume_info on the candidate IP.
+    static func inspectTV(host: String, port: Int = defaultPort, udap: Bool) async -> DiscoveredTV? {
         // Try rootservice.xml with UDAP/2.0 User-Agent
-        if let url = URL(string: "http://\(host):\(port)/udap/api/data?target=rootservice.xml") {
+        if udap, let url = URL(string: "http://\(host):\(port)/udap/api/data?target=rootservice.xml") {
             var req = URLRequest(url: url)
             req.timeoutInterval = 1.2
             req.setValue("Close", forHTTPHeaderField: "Connection")
@@ -276,13 +290,17 @@ final class NetworkDiscovery: ObservableObject {
 
             // 1. Fast probe: configured TV
             let current = TVConfig.load()
-            if let dev = await LGTVDiscovery.inspectTV(host: current.host, port: current.port) {
+            if let dev = await LGTVDiscovery.inspectTV(host: current.host, port: current.port, udap: true) {
                 self.addDevice(dev)
             }
 
-            // 2. Fast SSDP & B-SEARCH broadcast scan (takes ~1.5 - 2s)
+            // 2. Fast SSDP scan (takes ~1.5 - 2s): DLNA first; the UDAP search (M-SEARCH and B-SEARCH
+            // broadcast) puts LG's discovery popup on the TV, so it only runs when DLNA found nothing
             self.statusText = "Buscando via SSDP multicast..."
-            let ssdpDevices = await LGTVDiscovery.search(timeout: 2.0)
+            var ssdpDevices = await LGTVDiscovery.search(timeout: 2.0)
+            if ssdpDevices.isEmpty {
+                ssdpDevices = await LGTVDiscovery.search(timeout: 2.0, udap: true)
+            }
             for dev in ssdpDevices {
                 self.addDevice(dev)
             }
@@ -330,7 +348,7 @@ final class NetworkDiscovery: ObservableObject {
                         continue
                     }
                     group.addTask {
-                        return await LGTVDiscovery.inspectTV(host: host, port: 8080)
+                        return await LGTVDiscovery.inspectTV(host: host, port: 8080, udap: true)
                     }
                 }
 

@@ -31,6 +31,7 @@ final class LGTVClient: ObservableObject {
     private var pollTimer: Timer?
     private var lastSendTime: DispatchTime = .now()
     private let minGapSeconds: Double = 0.30
+    private var lastAutomaticSearch: Date = .distantPast
 
     init(config: TVConfig? = nil) {
         self.config = config ?? TVConfig.load()
@@ -62,8 +63,12 @@ final class LGTVClient: ObservableObject {
     // MARK: - TV Relocation (DHCP Migration)
 
     /// Attempts to relocate the TV when its IP address changed due to DHCP lease renewal.
+    /// Every failed request asks for this, and the TV often stalls for many seconds, so it searches
+    /// at most every 30 s.
     @discardableResult
     func relocateTVIfNeeded() async -> Bool {
+        guard Date().timeIntervalSince(lastAutomaticSearch) >= 30 else { return false }
+        lastAutomaticSearch = Date()
         guard let newHost = await LGTVDiscovery.locate(matching: config),
               newHost != config.host else {
             return false

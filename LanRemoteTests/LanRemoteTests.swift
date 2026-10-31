@@ -206,6 +206,16 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertNil(LGTVDiscovery.detectSubnetPrefix(from: "invalid"))
     }
 
+    func testAutomaticSearchIsDLNAOnly() {
+        // Every answer to a UDAP search puts LG's "Pairing Key" popup on the TV, and the automatic
+        // relocation runs whenever the TV stops answering.
+        let search = LGTVDiscovery.dlnaSearch
+        XCTAssertTrue(search.hasPrefix("M-SEARCH * HTTP/1.1\r\n"))
+        XCTAssertTrue(search.contains("ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n"))
+        XCTAssertFalse(search.lowercased().contains("udap"))
+        XCTAssertTrue(search.hasSuffix("\r\n\r\n"))
+    }
+
     // MARK: - Android TV protocol: protobuf
 
     func testProtobufRoundTrip() throws {
