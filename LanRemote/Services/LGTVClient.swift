@@ -63,14 +63,16 @@ final class LGTVClient: ObservableObject {
     // MARK: - TV Relocation (DHCP Migration)
 
     /// Attempts to relocate the TV when its IP address changed due to DHCP lease renewal.
-    /// Every failed request asks for this, and the TV often stalls for many seconds, so it searches
-    /// at most every 30 s.
+    /// The configured IP is checked every time. Every failed request asks for this, and the TV often
+    /// stalls for many seconds, so the search runs at most every 30 s.
     @discardableResult
     func relocateTVIfNeeded() async -> Bool {
-        guard Date().timeIntervalSince(lastAutomaticSearch) >= 30 else { return false }
-        lastAutomaticSearch = Date()
-        guard let newHost = await LGTVDiscovery.locate(matching: config),
-              newHost != config.host else {
+        var found = await LGTVDiscovery.probeKnownHosts(of: config)
+        if found == nil, Date().timeIntervalSince(lastAutomaticSearch) >= 30 {
+            lastAutomaticSearch = Date()
+            found = await LGTVDiscovery.locate(matching: config)
+        }
+        guard let newHost = found, newHost != config.host else {
             return false
         }
         NSLog("LG TV relocated from %@ to %@", config.host, newHost)

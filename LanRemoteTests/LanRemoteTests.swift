@@ -216,6 +216,27 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertTrue(search.hasSuffix("\r\n\r\n"))
     }
 
+    @MainActor
+    func testConfiguredIPIsCheckedOnEveryFailureNotOnlyEvery30Seconds() async throws {
+        // Every failed request asks for the relocation: the 30 s limit is for the search, while the
+        // TV answering at its configured IP is checked every time.
+        URLProtocol.registerClass(TVStub.self)
+        defer { URLProtocol.unregisterClass(TVStub.self) }
+        var config = TVConfig.default
+        config.host = TVStub.host
+        let client = LGTVClient(config: config)
+        let deadline = Date().addingTimeInterval(5)
+        while client.powerState == .unknown, Date() < deadline {   // the status check the client starts itself
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let probes = TVStub.probes
+        let first = await client.relocateTVIfNeeded()
+        let second = await client.relocateTVIfNeeded()
+        XCTAssertFalse(first, "the TV still answers at its IP")
+        XCTAssertFalse(second)
+        XCTAssertEqual(TVStub.probes - probes, 2)
+    }
+
     // MARK: - Android TV protocol: protobuf
 
     func testProtobufRoundTrip() throws {
@@ -433,4 +454,33 @@ final class LanRemoteTests: XCTestCase {
             XCTAssertFalse(help.label.isEmpty, "\(help.id) is shown on a button and needs a caption")
         }
     }
+}
+
+/// A TV at `host`, inside the test: 401 to the quick probe (`volume_info` with no session), as a NetCast
+/// answers it, and 200 to the client's own status queries. Nothing reaches the network, so the SSDP
+/// search never runs either.
+private final class TVStub: URLProtocol {
+    static let host = "192.0.2.77"
+    private static let lock = NSLock()
+    private static var probeCount = 0
+    static var probes: Int { lock.withLock { probeCount } }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == host
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let isProbe = url.query == "target=volume_info"
+        if isProbe {
+            Self.lock.withLock { Self.probeCount += 1 }
+        }
+        let response = HTTPURLResponse(url: url, statusCode: isProbe ? 401 : 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

@@ -52,22 +52,24 @@ enum LGTVDiscovery {
         }
     }
 
-    /// Locates the LG TV matching `config` (by current IP, DLNA discovery, or fast subnet sweep).
+    /// Where the LG TV matching `config` answers without a search: the configured IP (iOS doesn't let
+    /// apps read the ARP cache, which the Mac app checks too). A quick probe.
+    static func probeKnownHosts(of config: TVConfig) async -> String? {
+        let port = config.port > 0 ? config.port : defaultPort
+        return await probeHost(config.host, port: port) ? config.host : nil
+    }
+
+    /// Locates the LG TV matching `config` by DLNA discovery, or fast subnet sweep.
     /// It runs by itself whenever the TV stops answering, so it never uses the UDAP search.
     static func locate(matching config: TVConfig) async -> String? {
         let port = config.port > 0 ? config.port : defaultPort
 
-        // 1. Fast check: is the currently configured host responding?
-        if await probeHost(config.host, port: port) {
-            return config.host
-        }
-
-        // 2. SSDP DLNA M-SEARCH
+        // 1. SSDP DLNA M-SEARCH
         if let host = match(config, in: await search(timeout: 2.0)) {
             return host
         }
 
-        // 3. Fallback subnet sweep (if SSDP was blocked by Wi-Fi AP isolation or multicast filter)
+        // 2. Fallback subnet sweep (if SSDP was blocked by Wi-Fi AP isolation or multicast filter)
         let prefix = detectSubnetPrefix(from: config.host) ?? "192.168.1"
         if let sweepMatch = await quickSubnetSweep(prefix: prefix, port: port) {
             return sweepMatch
