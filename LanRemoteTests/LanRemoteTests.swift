@@ -201,8 +201,8 @@ final class LanRemoteTests: XCTestCase {
     }
 
     func testDetectSubnetPrefix() {
-        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "192.168.1.17"), "192.168.1")
-        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "10.0.0.5"), "10.0.0")
+        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "192.0.2.17"), "192.0.2")
+        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "198.51.100.5"), "198.51.100")
         XCTAssertNil(LGTVDiscovery.detectSubnetPrefix(from: "invalid"))
     }
 
@@ -453,6 +453,251 @@ final class LanRemoteTests: XCTestCase {
                      Help.simplink, Help.previousChannel, Help.info] {
             XCTAssertFalse(help.label.isEmpty, "\(help.id) is shown on a button and needs a caption")
         }
+        for statusHelp in [Help.notAnsweringStatus, Help.ipConflictStatus] {
+            XCTAssertFalse(statusHelp.title.isEmpty)
+            XCTAssertFalse(statusHelp.detail.isEmpty)
+            XCTAssertNotNil(UIImage(systemName: statusHelp.symbol))
+        }
+    }
+
+    // MARK: - Deaf HTTP server, ping, IP conflict and DHCP relocation
+
+    func testLoopbackAnswersICMPPing() async {
+        let alive = await LGTVDiscovery.answersPing("127.0.0.1", timeout: 0.6)
+        XCTAssertTrue(alive, "unprivileged SOCK_DGRAM ICMP ping must answer on loopback")
+    }
+
+    @MainActor
+    func testDeafControlServerQueueingAuthRetryAndIPConflict() async throws {
+        URLProtocol.registerClass(DeafTVStub.self)
+        defer { URLProtocol.unregisterClass(DeafTVStub.self) }
+        DeafTVStub.reset()
+
+        var config = TVConfig.default
+        config.host = DeafTVStub.host
+        config.pairingKey = "123456"
+        config.session = "111222"
+
+        let client = LGTVClient(config: config, autoStart: false)
+        var pingAlive = true
+        var foreignOpen = false
+        client.pingProbe = { _ in pingAlive }
+        client.foreignHostProbe = { _ in foreignOpen }
+        client.locateProbe = { _ in nil }
+
+        // 1. Deaf HTTP server with active ping: stays On (notAnswering), never marked Off
+        DeafTVStub.set(.deaf)
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .on)
+        XCTAssertTrue(client.notAnswering)
+        XCTAssertFalse(client.ipConflict)
+
+        // 2. Keys pressed while deaf wait and fire in exact FIFO order once HTTP returns (even across a 401)
+        client.sendKey(.volumeUp)
+        client.sendKey(.volumeUp)
+        client.sendKey(.volumeDown)
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        XCTAssertTrue(DeafTVStub.keys.isEmpty, "no key leaves while the control server is deaf")
+
+        DeafTVStub.set(.answering, requireAuthOnce: true)
+        let deadline = Date().addingTimeInterval(6)
+        while DeafTVStub.keys.count < 3, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(DeafTVStub.keys, [24, 24, 25], "queued keys arrive in order once HTTP answers")
+        XCTAssertGreaterThanOrEqual(DeafTVStub.pairings, 1, "expired session (401) re-pairs before resending")
+        XCTAssertEqual(client.powerState, .on)
+        XCTAssertFalse(client.notAnswering)
+
+        // 3. Stale keys older than keyPatience are dropped instead of firing late
+        DeafTVStub.clearKeys()
+        DeafTVStub.set(.deaf)
+        client.keyPatience = 1.1
+        client.sendKey(.mute)
+        client.sendKey(.home)
+        try await Task.sleep(nanoseconds: 2_300_000_000)
+        DeafTVStub.set(.answering)
+        await client.refreshStatus()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(DeafTVStub.keys.isEmpty, "stale keys older than keyPatience must be dropped")
+        client.keyPatience = 15
+
+        // 4. During turningOn, ping before port 8080 answers keeps turningOn until HTTP 200 arrives
+        DeafTVStub.set(.deaf)
+        client.powerState = .turningOn
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .turningOn)
+        DeafTVStub.set(.answering)
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .on)
+        XCTAssertFalse(client.notAnswering)
+
+        // 5. Standby: no HTTP and no ping -> Off
+        DeafTVStub.set(.deaf)
+        pingAlive = false
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .off)
+        XCTAssertFalse(client.notAnswering)
+
+        // 6. Right after power key, ping while shutting down does not flip the TV back to On
+        pingAlive = true
+        DeafTVStub.set(.answering)
+        await client.refreshStatus()
+        client.sendKey(.power)
+        let offDeadline = Date().addingTimeInterval(3)
+        while client.powerState != .off, Date() < offDeadline {
+            try await Task.sleep(nanoseconds: 40_000_000)
+        }
+        XCTAssertEqual(client.powerState, .off)
+        DeafTVStub.set(.deaf)
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .off, "post-power-off grace window ignores residual ping")
+
+        // 7. Active IP conflict: TV just answered, then HTTP fails while ping + foreign non-TV service answer
+        let activeClient = LGTVClient(config: config, autoStart: false)
+        activeClient.pingProbe = { _ in true }
+        activeClient.foreignHostProbe = { _ in foreignOpen }
+        activeClient.locateProbe = { _ in nil }
+        DeafTVStub.set(.answering)
+        await activeClient.refreshStatus()
+        XCTAssertEqual(activeClient.powerState, .on)
+
+        DeafTVStub.set(.deaf)
+        foreignOpen = true
+        await activeClient.refreshStatus()
+        XCTAssertEqual(activeClient.powerState, .on)
+        XCTAssertTrue(activeClient.notAnswering)
+        XCTAssertTrue(activeClient.ipConflict)
+
+        // 8. Old IP reassigned by DHCP while TV was off (never answered recently): treated as Off, not TV
+        let coldClient = LGTVClient(config: config, autoStart: false)
+        coldClient.pingProbe = { _ in true }
+        coldClient.foreignHostProbe = { _ in true }
+        coldClient.locateProbe = { _ in nil }
+        await coldClient.refreshStatus()
+        XCTAssertEqual(coldClient.powerState, .off)
+        XCTAssertFalse(coldClient.notAnswering)
+        XCTAssertFalse(coldClient.ipConflict)
+
+        // 9. When DHCP moved the TV to another IP while the old IP conflicts, relocation migrates seamlessly
+        let migratingClient = LGTVClient(config: config, autoStart: false)
+        migratingClient.pingProbe = { _ in true }
+        migratingClient.foreignHostProbe = { _ in true }
+        migratingClient.locateProbe = { _ in DeafTVStub.relocatedHost }
+        await migratingClient.refreshStatus()
+        XCTAssertEqual(migratingClient.config.host, DeafTVStub.relocatedHost)
+        XCTAssertEqual(migratingClient.powerState, .on)
+        XCTAssertFalse(migratingClient.notAnswering)
+        XCTAssertFalse(migratingClient.ipConflict)
+    }
+}
+
+private final class DeafTVStub: URLProtocol {
+    enum Mode { case deaf, answering }
+    static let host = "192.0.2.78"
+    static let relocatedHost = "192.0.2.79"
+
+    private static let lock = NSLock()
+    private static var _mode: Mode = .deaf
+    private static var _requireAuthOnce = false
+    private static var _keys: [Int] = []
+    private static var _pairings = 0
+
+    static var keys: [Int] { lock.withLock { _keys } }
+    static var pairings: Int { lock.withLock { _pairings } }
+
+    static func reset() {
+        lock.withLock {
+            _mode = .deaf
+            _requireAuthOnce = false
+            _keys.removeAll()
+            _pairings = 0
+        }
+    }
+
+    static func clearKeys() {
+        lock.withLock {
+            _keys.removeAll()
+            _pairings = 0
+        }
+    }
+
+    static func set(_ mode: Mode, requireAuthOnce: Bool = false) {
+        lock.withLock {
+            _mode = mode
+            _requireAuthOnce = requireAuthOnce
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        let h = request.url?.host
+        return h == host || h == relocatedHost
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let isRelocated = (url.host == Self.relocatedHost)
+        if !isRelocated, Self.lock.withLock({ Self._mode }) == .deaf {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
+
+        if url.path.hasSuffix("/auth") || url.path.hasSuffix("/pairing") {
+            Self.lock.withLock { Self._pairings += 1 }
+            let xml = "<envelope><session>99887766</session></envelope>"
+            let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(xml.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+
+        let needs401 = !isRelocated && Self.lock.withLock { () -> Bool in
+            if Self._requireAuthOnce {
+                Self._requireAuthOnce = false
+                return true
+            }
+            return false
+        }
+        if needs401 {
+            let resp = HTTPURLResponse(url: url, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+
+        if url.path.hasSuffix("/command"), let code = Self.keyCode(in: Self.body(of: request)) {
+            Self.lock.withLock { Self._keys.append(code) }
+        }
+        let xml = "<envelope><ROAPError>200</ROAPError><data><level>14</level><mute>false</mute></data></envelope>"
+        let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(xml.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> String {
+        if let body = request.httpBody { return String(decoding: body, as: UTF8.self) }
+        guard let stream = request.httpBodyStream else { return "" }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            guard n > 0 else { break }
+            data.append(buffer, count: n)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func keyCode(in xml: String) -> Int? {
+        guard let start = xml.range(of: "<value>"), let end = xml.range(of: "</value>") else { return nil }
+        return Int(xml[start.upperBound..<end.lowerBound])
     }
 }
 

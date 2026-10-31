@@ -8,7 +8,7 @@ Aplicativo nativo para **iPhone** e **iPad** desenvolvido em **SwiftUI** para co
 
 - **Liga a TV sem levantar do sofá**: em standby a LG NetCast desliga a rede, então o app acorda a **TV Box** (Android TV) ligada no HDMI e ela liga a TV pelo **HDMI-CEC (SIMPLINK)**. Detalhes em [Ligar a TV pelo app](#-ligar-a-tv-pelo-app).
 - **Botões que se explicam**: ícone + nome em português em cada botão, agrupados por função (Navegação, Volume e canal, Recursos da TV, Reprodução, Botões coloridos). **Segurar** um botão mostra no rodapé o que ele faz, sem enviar nada à TV; o **?** abre o **Guia dos botões** completo. Os mesmos textos alimentam o VoiceOver.
-- **Estado da TV à vista**: `Ligada`, `Desligada` ou `Ligando…` no topo, com volume e entrada atual. Com a TV desligada o controle fica esmaecido e um cartão mostra o botão **Ligar**.
+- **Estado da TV à vista**: `Ligada`, `Ligada · sem resposta` (quando a TV responde ao ping na rede mas a porta 8080 oscila; as teclas ficam na fila por até 15 s em ordem), `Ligada · conflito de IP` (quando outro equipamento responde no mesmo IP logo após a TV), `Desligada` ou `Ligando…` no topo, com volume e entrada atual. Com a TV desligada o controle fica esmaecido e um cartão mostra o botão **Ligar**.
 - **Zero Dependências Externas**: Construído puramente sobre o ecossistema Apple (`SwiftUI`, `Network`, `Security`, `CryptoKit`, `AVFoundation`, `MediaPlayer`).
 - **Arquitetura Serverless Local**: O iPhone comunica-se diretamente com a TV pela porta `8080` (HTTP) através da rede Wi-Fi local. Zero nuvem, zero telemetria e latência inferior a 100ms.
 - **Feedback Háptico Realista**: Cada botão (D-Pad, volume, ok, numérico, power) aciona vibrações táteis finas (`UIImpactFeedbackGenerator`).

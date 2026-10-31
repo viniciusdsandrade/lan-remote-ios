@@ -133,11 +133,23 @@ struct RemoteView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    Text(statusText)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(statusColor)
+                    if client.powerState == .on, client.notAnswering {
+                        Text(statusText)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(statusColor)
+                            .lineLimit(1)
+                            .onTapGesture {
+                                help.show(client.ipConflict ? Help.ipConflictStatus : Help.notAnsweringStatus)
+                            }
+                            .controlHelp(client.ipConflict ? Help.ipConflictStatus : Help.notAnsweringStatus)
+                    } else {
+                        Text(statusText)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(statusColor)
+                            .lineLimit(1)
+                    }
 
-                    if client.powerState == .on {
+                    if client.powerState == .on, !client.notAnswering {
                         Text("•")
                             .font(.system(size: 10))
                             .foregroundColor(Color(white: 0.4))
@@ -175,7 +187,9 @@ struct RemoteView: View {
 
     private var statusText: String {
         switch client.powerState {
-        case .on: return "Ligada"
+        case .on:
+            if client.ipConflict { return "Ligada · conflito de IP" }
+            return client.notAnswering ? "Ligada · sem resposta" : "Ligada"
         case .off: return "Desligada"
         case .turningOn: return "Ligando…"
         case .unknown: return "Verificando…"
@@ -184,7 +198,7 @@ struct RemoteView: View {
 
     private var statusColor: Color {
         switch client.powerState {
-        case .on: return Color.green
+        case .on: return client.notAnswering ? Color.orange : Color.green
         case .off: return Color(red: 0.95, green: 0.35, blue: 0.3)
         case .turningOn: return Color(red: 0.4, green: 0.7, blue: 1.0)
         case .unknown: return Color(white: 0.55)

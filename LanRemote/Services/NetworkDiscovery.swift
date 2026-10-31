@@ -36,7 +36,11 @@ enum LGTVDiscovery {
     /// the TV and a "Pairing Key" field (UDAP 2.0 spec, "Host screen after discovery response").
     static let dlnaSearch = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSER-AGENT: iOS/1.0 UPnP/1.1 lg_roap_control/1.0.0\r\n\r\n"
 
-    /// Quick probe to check if a TV answers HTTP on `host:port`.
+    /// Ports that LG NetCast TVs never open (their firewall drops SYNs there), whereas routers,
+    /// access points, computers and phones commonly listen on at least one of them.
+    private static let foreignServicePorts: [UInt16] = [80, 443, 22, 53, 445, 62078]
+
+    /// Quick probe to check if a TV answers HTTP ROAP on `host:port`.
     static func probeHost(_ host: String, port: Int = defaultPort, timeout: TimeInterval = 1.0) async -> Bool {
         guard let url = URL(string: "http://\(host):\(port)/roap/api/data?target=volume_info") else { return false }
         var req = URLRequest(url: url)
@@ -44,12 +48,192 @@ enum LGTVDiscovery {
         req.setValue("Close", forHTTPHeaderField: "Connection")
         req.setValue("lg_roap_control/1.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
         do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else { return false }
-            return http.statusCode == 200 || http.statusCode == 401
+            if http.statusCode == 401 { return true }
+            guard http.statusCode == 200 else { return false }
+            if data.isEmpty { return true }
+            let body = String(data: data, encoding: .utf8) ?? ""
+            return body.localizedCaseInsensitiveContains("ROAP")
+                || body.localizedCaseInsensitiveContains("<envelope")
+                || body.localizedCaseInsensitiveContains("<level>")
         } catch {
             return false
         }
+    }
+
+    /// Whether `host` answers an unprivileged ICMP Echo Request within `timeout`.
+    /// In standby the NetCast TV powers its network interface down, so a ping reply tells an awake
+    /// host whose HTTP port 8080 timed out apart from standby.
+    static func answersPing(_ host: String, timeout: TimeInterval = 1.0) async -> Bool {
+        await Task.detached(priority: .utility) {
+            sendICMPPing(host: host, timeout: timeout)
+        }.value
+    }
+
+    /// Whether `host` accepts TCP connections on non-TV ports (such as HTTP 80/443 on an AP or router).
+    /// Since iOS apps cannot read the kernel ARP MAC table, an open non-TV service at the TV's IP
+    /// tells a LAN IP conflict (or a DHCP lease reassigned while the TV was off) apart from the TV.
+    static func hasForeignService(_ host: String, timeout: TimeInterval = 0.45) async -> Bool {
+        await Task.detached(priority: .utility) {
+            probeAnyTCPPort(host: host, ports: foreignServicePorts, timeout: timeout)
+        }.value
+    }
+
+    private static func sendICMPPing(host: String, timeout: TimeInterval) -> Bool {
+        var dest = sockaddr_in()
+        dest.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        dest.sin_family = sa_family_t(AF_INET)
+        guard inet_pton(AF_INET, host, &dest.sin_addr) == 1 else { return false }
+
+        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+
+        let ident = UInt16.random(in: 1...UInt16.max)
+        let seq: UInt16 = 1
+        let payload: [UInt8] = (0..<8).map { _ in UInt8.random(in: 0...255) }
+        var packet = [UInt8](repeating: 0, count: 8 + payload.count)
+        packet[0] = 8 // ICMP_ECHO
+        packet[1] = 0
+        packet[4] = UInt8(ident >> 8)
+        packet[5] = UInt8(ident & 0xFF)
+        packet[6] = UInt8(seq >> 8)
+        packet[7] = UInt8(seq & 0xFF)
+        for (idx, byte) in payload.enumerated() {
+            packet[8 + idx] = byte
+        }
+
+        var sum: UInt32 = 0
+        var idx = 0
+        while idx + 1 < packet.count {
+            sum &+= (UInt32(packet[idx]) << 8) | UInt32(packet[idx + 1])
+            idx += 2
+        }
+        if idx < packet.count {
+            sum &+= UInt32(packet[idx]) << 8
+        }
+        while (sum >> 16) != 0 {
+            sum = (sum & 0xFFFF) &+ (sum >> 16)
+        }
+        let checksum = ~UInt16(sum & 0xFFFF)
+        packet[2] = UInt8(checksum >> 8)
+        packet[3] = UInt8(checksum & 0xFF)
+
+        let sent = packet.withUnsafeBytes { bytes in
+            withUnsafePointer(to: &dest) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    sendto(fd, bytes.baseAddress, bytes.count, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+        guard sent == packet.count else { return false }
+
+        var buffer = [UInt8](repeating: 0, count: 256)
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return false }
+
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&pfd, 1, Int32(ceil(remaining * 1000)))
+            if ready < 0 && errno == EINTR { continue }
+            guard ready > 0 else { return false }
+
+            var sender = sockaddr_in()
+            var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let count = withUnsafeMutablePointer(to: &sender) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    recvfrom(fd, &buffer, buffer.count, 0, sa, &len)
+                }
+            }
+            guard count >= 8 + payload.count,
+                  sender.sin_addr.s_addr == dest.sin_addr.s_addr else { continue }
+
+            let icmpOffset: Int
+            if (buffer[0] >> 4) == 4 {
+                let ihl = Int(buffer[0] & 0x0F) * 4
+                guard ihl >= 20, count >= ihl + 8 + payload.count else { continue }
+                icmpOffset = ihl
+            } else {
+                icmpOffset = 0
+            }
+
+            let replyType = buffer[icmpOffset]
+            let replyCode = buffer[icmpOffset + 1]
+            let replySeq = (UInt16(buffer[icmpOffset + 6]) << 8) | UInt16(buffer[icmpOffset + 7])
+            guard replyType == 0, replyCode == 0, replySeq == seq else { continue }
+            if Array(buffer[(icmpOffset + 8)..<(icmpOffset + 8 + payload.count)]) == payload {
+                return true
+            }
+        }
+    }
+
+    private static func probeAnyTCPPort(host: String, ports: [UInt16], timeout: TimeInterval) -> Bool {
+        var baseAddr = sockaddr_in()
+        baseAddr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        baseAddr.sin_family = sa_family_t(AF_INET)
+        guard inet_pton(AF_INET, host, &baseAddr.sin_addr) == 1 else { return false }
+
+        var openFds: [Int32] = []
+        defer {
+            for fd in openFds { Darwin.close(fd) }
+        }
+
+        for port in ports {
+            let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+            guard fd >= 0 else { continue }
+            let flags = fcntl(fd, F_GETFL, 0)
+            _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+
+            var addr = baseAddr
+            addr.sin_port = port.bigEndian
+            let rc = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    Darwin.connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if rc == 0 {
+                Darwin.close(fd)
+                return true
+            }
+            if errno == EINPROGRESS {
+                openFds.append(fd)
+            } else {
+                Darwin.close(fd)
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while !openFds.isEmpty {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return false }
+
+            var pfds = openFds.map { pollfd(fd: $0, events: Int16(POLLOUT), revents: 0) }
+            let ready = poll(&pfds, nfds_t(pfds.count), Int32(ceil(remaining * 1000)))
+            if ready < 0 && errno == EINTR { continue }
+            guard ready > 0 else { return false }
+
+            var stillPending: [Int32] = []
+            for pfd in pfds {
+                if pfd.revents == 0 {
+                    stillPending.append(pfd.fd)
+                    continue
+                }
+                var soErr: Int32 = -1
+                var soLen = socklen_t(MemoryLayout<Int32>.size)
+                if (pfd.revents & Int16(POLLERR | POLLHUP | POLLNVAL)) == 0,
+                   getsockopt(pfd.fd, SOL_SOCKET, SO_ERROR, &soErr, &soLen) == 0,
+                   soErr == 0 {
+                    Darwin.close(pfd.fd)
+                    openFds = stillPending + pfds.drop(while: { $0.fd != pfd.fd }).dropFirst().map(\.fd)
+                    return true
+                }
+                Darwin.close(pfd.fd)
+            }
+            openFds = stillPending
+        }
+        return false
     }
 
     /// Where the LG TV matching `config` answers without a search: the configured IP (iOS doesn't let

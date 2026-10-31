@@ -8,6 +8,10 @@ import UIKit
 final class LGTVClient: ObservableObject {
     @Published var config: TVConfig
     @Published var powerState: TVPowerState = .unknown
+    /// On, but its control server isn't taking requests (see `checkTVPing`): recent keys wait briefly.
+    @Published var notAnswering: Bool = false
+    /// Another device on the LAN answered at the TV's IP right after the TV was active there.
+    @Published var ipConflict: Bool = false
     @Published var isMuted: Bool = false
     @Published var volumeLevel: Int = 10
     @Published var inputSourceName: String = "---"
@@ -31,10 +35,22 @@ final class LGTVClient: ObservableObject {
     private var pollTimer: Timer?
     private var lastSendTime: DispatchTime = .now()
     private let minGapSeconds: Double = 0.30
+    private var pendingKeys: [(code: Int, label: String, pressed: Date)] = []
+    private var sendingKeys = false
+    /// How long a key waits for the control server to come back before it is dropped (short enough
+    /// never to surprise the user a minute later with stale volume or navigation presses).
+    var keyPatience: TimeInterval = 15
+    var pingProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.answersPing($0) }
+    var foreignHostProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.hasForeignService($0) }
+    var locateProbe: @Sendable (TVConfig) async -> String? = { await LGTVDiscovery.locate(matching: $0) }
+    private var poweredOffAt: Date?
+    private var lastAnsweredAt: Date?
+    private let ipConflictWindow: TimeInterval = 120
     private var lastAutomaticSearch: Date = .distantPast
 
-    init(config: TVConfig? = nil) {
+    init(config: TVConfig? = nil, autoStart: Bool = true) {
         self.config = config ?? TVConfig.load()
+        guard autoStart else { return }
         startPolling()
         Task {
             await self.refreshStatus()
@@ -52,7 +68,13 @@ final class LGTVClient: ObservableObject {
     }
 
     func updateHost(_ newHost: String, port: Int = 8080) {
-        config.host = newHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = newHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed != config.host || port != config.port {
+            lastAnsweredAt = nil
+            notAnswering = false
+            ipConflict = false
+        }
+        config.host = trimmed
         config.port = port
         saveConfig()
         Task {
@@ -70,13 +92,18 @@ final class LGTVClient: ObservableObject {
         var found = await LGTVDiscovery.probeKnownHosts(of: config)
         if found == nil, Date().timeIntervalSince(lastAutomaticSearch) >= 30 {
             lastAutomaticSearch = Date()
-            found = await LGTVDiscovery.locate(matching: config)
+            let currentConfig = config
+            let locate = locateProbe
+            found = await locate(currentConfig)
         }
         guard let newHost = found, newHost != config.host else {
             return false
         }
         NSLog("LG TV relocated from %@ to %@", config.host, newHost)
         self.config.host = newHost
+        self.lastAnsweredAt = nil
+        self.notAnswering = false
+        self.ipConflict = false
         saveConfig()
         return true
     }
@@ -134,26 +161,42 @@ final class LGTVClient: ObservableObject {
             HapticManager.shared.warning()
             return
         }
-        let code = key.rawValue
-        let label = key.label
 
         // Trigger specific haptic feedback based on key type
         triggerHaptic(for: key)
 
-        Task { [weak self] in
-            guard let self = self else { return }
+        pendingKeys.append((key.rawValue, key.label, Date()))
+        guard !sendingKeys else { return }
+        sendingKeys = true
+        Task { [weak self] in await self?.sendPendingKeys() }
+    }
+
+    /// Sends the keys one at a time, in the order they were pressed: a key waiting for the TV holds
+    /// the ones pressed after it, and any key that waited longer than `keyPatience` is dropped.
+    private func sendPendingKeys() async {
+        while !pendingKeys.isEmpty {
+            guard powerState != .off else {
+                pendingKeys.removeAll()
+                break
+            }
+            let key = pendingKeys.removeFirst()
+            guard Date().timeIntervalSince(key.pressed) < keyPatience else {
+                NSLog("LG TV: tecla %@ descartada, esperou mais de %.0f s na fila", key.label, keyPatience)
+                continue
+            }
 
             // Debounce timing: Ensure min gap between key transmissions to avoid TV packet drop
             let now = DispatchTime.now()
-            let elapsed = Double(now.uptimeNanoseconds - self.lastSendTime.uptimeNanoseconds) / 1_000_000_000.0
-            if elapsed < self.minGapSeconds {
-                let waitNanos = UInt64((self.minGapSeconds - elapsed) * 1_000_000_000)
+            let elapsed = Double(now.uptimeNanoseconds - lastSendTime.uptimeNanoseconds) / 1_000_000_000.0
+            if elapsed < minGapSeconds {
+                let waitNanos = UInt64((minGapSeconds - elapsed) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: waitNanos)
             }
-            self.lastSendTime = DispatchTime.now()
+            lastSendTime = DispatchTime.now()
 
-            await self.performSendKey(code: code, label: label)
+            await performSendKey(code: key.code, label: key.label, pressed: key.pressed)
         }
+        sendingKeys = false
     }
 
     private func triggerHaptic(for key: TVKey) {
@@ -175,7 +218,8 @@ final class LGTVClient: ObservableObject {
         }
     }
 
-    private func performSendKey(code: Int, label: String, retryCount: Int = 0) async {
+    private func performSendKey(code: Int, label: String, pressed: Date,
+                                allowAuthRetry: Bool = true, allowRelocate: Bool = true) async {
         let session = config.session ?? ""
         let xml: String
         let path: String
@@ -195,19 +239,32 @@ final class LGTVClient: ObservableObject {
             if let httpResp = resp as? HTTPURLResponse {
                 if httpResp.statusCode == 200 {
                     // The power key only switches the TV off: its network goes down right after.
-                    self.powerState = code == TVKey.power.rawValue ? .off : .on
+                    if code == TVKey.power.rawValue {
+                        notAnswering = false
+                        ipConflict = false
+                        self.powerState = .off
+                        poweredOffAt = Date()
+                        lastAnsweredAt = nil
+                    } else {
+                        markAnswering()
+                        self.powerState = .on
+                    }
 
                     // Trigger status refresh shortly after volume/channel commands
                     if code == TVKey.volumeUp.rawValue || code == TVKey.volumeDown.rawValue || code == TVKey.mute.rawValue {
-                        try? await Task.sleep(nanoseconds: 350_000_000)
-                        await self.refreshStatus()
+                        Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 350_000_000)
+                            await self?.refreshStatus()
+                        }
                     }
                     return
-                } else if httpResp.statusCode == 401 && retryCount == 0 {
+                } else if httpResp.statusCode == 401 && allowAuthRetry {
                     // Session expired or unauthenticated; attempt re-pairing
+                    markAnswering()
                     let success = await self.pairWithSavedKey()
                     if success {
-                        await self.performSendKey(code: code, label: label, retryCount: 1)
+                        await self.performSendKey(code: code, label: label, pressed: pressed,
+                                                  allowAuthRetry: false, allowRelocate: false)
                         return
                     }
                 } else {
@@ -216,19 +273,83 @@ final class LGTVClient: ObservableObject {
                 }
             }
         } catch {
-            if retryCount == 0 {
-                let relocated = await relocateTVIfNeeded()
-                if relocated {
-                    await performSendKey(code: code, label: label, retryCount: 1)
-                    return
-                }
+            if allowRelocate, await relocateTVIfNeeded() {
+                await performSendKey(code: code, label: label, pressed: pressed,
+                                     allowAuthRetry: allowAuthRetry, allowRelocate: false)
+                return
             }
-            markUnreachable()
+            switch await checkTVPing() {
+            case .aliveSameTV:
+                markNotAnswering(conflict: false)
+            case .ipConflict:
+                markNotAnswering(conflict: true)
+            case .unreachable:
+                markUnreachable()
+                return
+            }
+            guard Date().timeIntervalSince(pressed) < keyPatience else {
+                NSLog("LG TV: tecla %@ descartada, a TV ficou %.0f s sem aceitar comandos", label, keyPatience)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await performSendKey(code: code, label: label, pressed: pressed,
+                                 allowAuthRetry: allowAuthRetry, allowRelocate: false)
         }
     }
 
-    /// No answer from the TV: for this model that means standby (unless we are switching it on).
+    private enum PingStatus {
+        case unreachable
+        case aliveSameTV
+        case ipConflict
+    }
+
+    /// Distinguishes standby (network interface down, no ping) from an awake TV whose HTTP port timed
+    /// out, and from an active LAN IP conflict where another device (with non-TV ports open) answers
+    /// at the TV's IP right after the TV was responding there. Right after the power key the TV still
+    /// answers ping briefly while shutting down.
+    private func checkTVPing() async -> PingStatus {
+        if let poweredOffAt, Date().timeIntervalSince(poweredOffAt) < 30 { return .unreachable }
+        let host = config.host
+        let probe = pingProbe
+        let checkForeign = foreignHostProbe
+        guard await probe(host) else { return .unreachable }
+        if await checkForeign(host) {
+            if let lastAnsweredAt, Date().timeIntervalSince(lastAnsweredAt) < ipConflictWindow {
+                return .ipConflict
+            }
+            return .unreachable
+        }
+        return .aliveSameTV
+    }
+
+    private func markNotAnswering(conflict: Bool) {
+        if conflict, !ipConflict {
+            NSLog("LG TV: conflito de IP em %@ — outro aparelho respondeu no endereço da TV", config.host)
+        } else if !conflict, !notAnswering {
+            NSLog("LG TV: ligada (responde ao ping), mas sem aceitar comandos na porta %d", config.port)
+        }
+        notAnswering = true
+        ipConflict = conflict
+        if powerState != .turningOn {
+            powerState = .on
+            powerOnError = nil
+        }
+    }
+
+    private func markAnswering() {
+        if notAnswering {
+            NSLog("LG TV: voltou a aceitar comandos")
+        }
+        notAnswering = false
+        ipConflict = false
+        poweredOffAt = nil
+        lastAnsweredAt = Date()
+    }
+
+    /// No answer from the TV, not even to ping: standby (unless we are switching it on).
     private func markUnreachable() {
+        notAnswering = false
+        ipConflict = false
         if powerState != .turningOn {
             powerState = .off
         }
@@ -239,11 +360,20 @@ final class LGTVClient: ObservableObject {
     /// What the TV is showing, as a JPEG (the screen_image query). Nil when the TV doesn't answer.
     func screenImage() async -> Data? {
         let basePath = config.protocolType == "udap" ? "/udap/api/data" : "/roap/api/data"
-        guard let request = createRequest(path: "\(basePath)?target=screen_image&session=\(config.session ?? "")"),
-              let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              data.starts(with: [0xFF, 0xD8]) else { return nil }
-        return data
+        if let request = createRequest(path: "\(basePath)?target=screen_image&session=\(config.session ?? "")"),
+           let (data, response) = try? await URLSession.shared.data(for: request),
+           (response as? HTTPURLResponse)?.statusCode == 200,
+           data.starts(with: [0xFF, 0xD8]) {
+            return data
+        }
+        if await relocateTVIfNeeded(),
+           let retryReq = createRequest(path: "\(basePath)?target=screen_image&session=\(config.session ?? "")"),
+           let (data, response) = try? await URLSession.shared.data(for: retryReq),
+           (response as? HTTPURLResponse)?.statusCode == 200,
+           data.starts(with: [0xFF, 0xD8]) {
+            return data
+        }
+        return nil
     }
 
     func refreshStatus() async {
@@ -254,48 +384,85 @@ final class LGTVClient: ObservableObject {
     }
 
     private func performStatusCheck(allowRelocate: Bool) async {
-        let session = config.session ?? ""
+        var session = config.session ?? ""
         let basePath = config.protocolType == "udap" ? "/udap/api/data" : "/roap/api/data"
         let volPath = "\(basePath)?target=volume_info&session=\(session)"
 
         if let volReq = createRequest(path: volPath) {
             do {
-                let (data, resp): (Data, URLResponse)
-                do {
-                    (data, resp) = try await URLSession.shared.data(for: volReq)
-                } catch where powerState == .on || powerState == .unknown {
-                    // One miss doesn't mean standby: the first request after launch sometimes fails
-                    // while the TV is fine. Ask once more before showing it as off.
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    (data, resp) = try await URLSession.shared.data(for: volReq)
-                }
-                if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 200 {
-                    self.powerState = .on
-                    self.powerOnError = nil
-                    if let str = String(data: data, encoding: .utf8) {
-                        if let muteVal = Self.extractXMLTag(from: str, tag: "mute") {
-                            self.isMuted = (muteVal.lowercased() == "true")
+                let (data, resp) = try await URLSession.shared.data(for: volReq)
+                if let httpResp = resp as? HTTPURLResponse {
+                    if httpResp.statusCode == 200 {
+                        markAnswering()
+                        self.powerState = .on
+                        self.powerOnError = nil
+                        if let str = String(data: data, encoding: .utf8) {
+                            if let muteVal = Self.extractXMLTag(from: str, tag: "mute") {
+                                self.isMuted = (muteVal.lowercased() == "true")
+                            }
+                            if let lvlVal = Self.extractXMLTag(from: str, tag: "level"), let lvl = Int(lvlVal) {
+                                self.volumeLevel = lvl
+                            }
                         }
-                        if let lvlVal = Self.extractXMLTag(from: str, tag: "level"), let lvl = Int(lvlVal) {
-                            self.volumeLevel = lvl
+                    } else if httpResp.statusCode == 401 {
+                        markAnswering()
+                        if await self.pairWithSavedKey() {
+                            session = config.session ?? ""
+                            if let retryReq = createRequest(path: "\(basePath)?target=volume_info&session=\(session)"),
+                               let (rData, rResp) = try? await URLSession.shared.data(for: retryReq),
+                               (rResp as? HTTPURLResponse)?.statusCode == 200 {
+                                self.powerState = .on
+                                self.powerOnError = nil
+                                if let str = String(data: rData, encoding: .utf8) {
+                                    if let muteVal = Self.extractXMLTag(from: str, tag: "mute") {
+                                        self.isMuted = (muteVal.lowercased() == "true")
+                                    }
+                                    if let lvlVal = Self.extractXMLTag(from: str, tag: "level"), let lvl = Int(lvlVal) {
+                                        self.volumeLevel = lvl
+                                    }
+                                }
+                            }
+                        } else {
+                            switch await checkTVPing() {
+                            case .aliveSameTV:
+                                markNotAnswering(conflict: false)
+                            case .ipConflict:
+                                markNotAnswering(conflict: true)
+                            case .unreachable:
+                                markUnreachable()
+                            }
+                            refreshBoxAddressIfNeeded()
+                            return
                         }
-                    }
-                } else if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 401 {
-                    let reAuth = await self.pairWithSavedKey()
-                    if reAuth {
-                        await self.performStatusCheck(allowRelocate: false)
+                    } else {
+                        if allowRelocate, await relocateTVIfNeeded() {
+                            await performStatusCheck(allowRelocate: false)
+                            return
+                        }
+                        if let lastAnsweredAt, Date().timeIntervalSince(lastAnsweredAt) < ipConflictWindow {
+                            markNotAnswering(conflict: true)
+                        } else {
+                            markUnreachable()
+                        }
+                        refreshBoxAddressIfNeeded()
                         return
                     }
                 }
             } catch {
-                if allowRelocate {
-                    let relocated = await relocateTVIfNeeded()
-                    if relocated {
-                        await performStatusCheck(allowRelocate: false)
-                        return
-                    }
+                // Check first whether DHCP moved the TV to another IP; otherwise use ping + foreign-port
+                // probe to tell standby apart from a transient HTTP stall or an active LAN IP conflict.
+                if allowRelocate, await relocateTVIfNeeded() {
+                    await performStatusCheck(allowRelocate: false)
+                    return
                 }
-                markUnreachable()
+                switch await checkTVPing() {
+                case .aliveSameTV:
+                    markNotAnswering(conflict: false)
+                case .ipConflict:
+                    markNotAnswering(conflict: true)
+                case .unreachable:
+                    markUnreachable()
+                }
                 refreshBoxAddressIfNeeded()
                 return   // no point asking for the channel as well
             }
@@ -352,13 +519,7 @@ final class LGTVClient: ObservableObject {
         return (false, "Resposta desconhecida")
     }
 
-    func confirmPairing(key: String) async -> (success: Bool, message: String) {
-        let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanKey.count >= 6 else {
-            HapticManager.shared.warning()
-            return (false, "Chave deve conter 6 dígitos.")
-        }
-
+    private func authenticateWithKey(_ cleanKey: String) async -> (success: Bool, statusCode: Int?, errorMessage: String?) {
         let path = config.protocolType == "udap" ? "/udap/api/pairing" : "/roap/api/auth"
         let xml: String
         if config.protocolType == "udap" {
@@ -368,45 +529,62 @@ final class LGTVClient: ObservableObject {
         }
 
         guard let req = createRequest(path: path, method: "POST", body: xml) else {
-            return (false, "URL inválida")
+            return (false, nil, "URL inválida")
         }
 
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             if let httpResp = resp as? HTTPURLResponse {
                 if httpResp.statusCode == 200 {
+                    markAnswering()
                     self.config.pairingKey = cleanKey
-                    if let str = String(data: data, encoding: .utf8) {
-                        if let session = Self.extractXMLTag(from: str, tag: "session") {
-                            self.config.session = session
-                        }
+                    if let str = String(data: data, encoding: .utf8),
+                       let session = Self.extractXMLTag(from: str, tag: "session") {
+                        self.config.session = session
                     }
                     self.saveConfig()
                     self.powerState = .on
-                    HapticManager.shared.success()
-                    if !self.isRefreshing {
-                        await self.refreshStatus()
-                    }
-                    return (true, "Pareamento concluído com sucesso!")
-                } else if httpResp.statusCode == 401 {
-                    HapticManager.shared.error()
-                    return (false, "Código incorreto! Confira os dígitos na tela da TV.")
-                } else {
-                    HapticManager.shared.error()
-                    return (false, "Erro HTTP \(httpResp.statusCode)")
+                    self.powerOnError = nil
+                    return (true, 200, nil)
                 }
+                return (false, httpResp.statusCode, nil)
             }
         } catch {
-            HapticManager.shared.error()
-            return (false, "Erro de rede: \(error.localizedDescription)")
+            return (false, nil, error.localizedDescription)
+        }
+        return (false, nil, "Erro inesperado")
+    }
+
+    func confirmPairing(key: String) async -> (success: Bool, message: String) {
+        let cleanKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanKey.count >= 6 else {
+            HapticManager.shared.warning()
+            return (false, "Chave deve conter 6 dígitos.")
+        }
+
+        let res = await authenticateWithKey(cleanKey)
+        if res.success {
+            HapticManager.shared.success()
+            if !self.isRefreshing {
+                await self.refreshStatus()
+            }
+            return (true, "Pareamento concluído com sucesso!")
+        }
+        HapticManager.shared.error()
+        if res.statusCode == 401 {
+            return (false, "Código incorreto! Confira os dígitos na tela da TV.")
+        } else if let status = res.statusCode {
+            return (false, "Erro HTTP \(status)")
+        } else if let err = res.errorMessage {
+            return (false, "Erro de rede: \(err)")
         }
         return (false, "Erro inesperado")
     }
 
     private func pairWithSavedKey() async -> Bool {
-        guard let key = config.pairingKey, !key.isEmpty else { return false }
-        let res = await confirmPairing(key: key)
-        return res.success
+        guard let key = config.pairingKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              key.count >= 6 else { return false }
+        return await authenticateWithKey(key).success
     }
 
     // MARK: - Utilities
