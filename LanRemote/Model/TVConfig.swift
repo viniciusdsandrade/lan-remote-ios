@@ -39,17 +39,38 @@ struct TVConfig: Codable, Equatable, Sendable {
         )
     }
     
-    static func load() -> TVConfig {
-        if let data = UserDefaults.standard.data(forKey: defaultsKey),
+    static func load(from defaults: UserDefaults = .standard) -> TVConfig {
+        if let data = defaults.data(forKey: defaultsKey),
            let config = try? JSONDecoder().decode(TVConfig.self, from: data) {
             return config
         }
+        if let legacy = legacyConfig(in: defaults) {
+            legacy.save(to: defaults)
+            return legacy
+        }
         return .default
     }
-    
-    func save() {
+
+    /// A configuration saved by an older build under another key prefix (installing over an older
+    /// bundle id keeps its UserDefaults). Without it the app started from the factory default, with no
+    /// pairing key and an IP outside the LAN, and never found the TV. Adopted once: `load` saves it
+    /// under `defaultsKey`, so the old key is never read again.
+    static func legacyConfig(in defaults: UserDefaults) -> TVConfig? {
+        let candidates = defaults.dictionaryRepresentation()
+            .filter { $0.key.hasSuffix(".config") && $0.key != defaultsKey }
+            .sorted { $0.key < $1.key }
+            .compactMap { entry -> TVConfig? in
+                guard let data = entry.value as? Data,
+                      let config = try? JSONDecoder().decode(TVConfig.self, from: data),
+                      !config.host.isEmpty else { return nil }
+                return config
+            }
+        return candidates.first { $0.pairingKey?.isEmpty == false } ?? candidates.first
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+            defaults.set(data, forKey: Self.defaultsKey)
         }
     }
 }

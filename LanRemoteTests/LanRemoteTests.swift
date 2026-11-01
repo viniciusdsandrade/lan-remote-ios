@@ -200,10 +200,123 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertNil(tv.uuid)
     }
 
-    func testDetectSubnetPrefix() {
-        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "192.0.2.17"), "192.0.2")
-        XCTAssertEqual(LGTVDiscovery.detectSubnetPrefix(from: "198.51.100.5"), "198.51.100")
-        XCTAssertNil(LGTVDiscovery.detectSubnetPrefix(from: "invalid"))
+    func testConfigSavedByAnOlderBuildUnderAnotherKeyIsAdoptedOnce() throws {
+        // Installing over an older bundle id keeps its UserDefaults, but the TV config sat under that
+        // build's key: the app fell back to the factory default (no pairing key, IP outside the LAN).
+        let suite = "lanremote.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var old = TVConfig.default
+        old.host = "10.20.30.17"
+        old.pairingKey = "123456"
+        old.session = "123456789"
+        defaults.set(try JSONEncoder().encode(old), forKey: "org.example.olderbuild.config")
+        defaults.set(Data("not a config".utf8), forKey: "org.example.other.config")
+        XCTAssertNil(defaults.data(forKey: TVConfig.defaultsKey))
+
+        let loaded = TVConfig.load(from: defaults)
+        XCTAssertEqual(loaded, old, "IP, pairing key and session come back")
+        XCTAssertNotNil(defaults.data(forKey: TVConfig.defaultsKey), "saved under the current key")
+
+        var current = loaded
+        current.host = "10.20.30.10"
+        current.save(to: defaults)
+        XCTAssertEqual(TVConfig.load(from: defaults).host, "10.20.30.10", "the current key wins from then on")
+
+        let empty = try XCTUnwrap(UserDefaults(suiteName: suite + ".empty"))
+        defer { empty.removePersistentDomain(forName: suite + ".empty") }
+        XCTAssertEqual(TVConfig.load(from: empty), .default)
+    }
+
+    // MARK: - Sweep of the iPhone's own subnet (on iOS, SSDP gets no answer without the multicast entitlement)
+
+    func testSweepCoversTheDevicesSubnetEvenWithTheFactoryDefaultIP() throws {
+        // The factory default 192.0.2.100 used to set the subnet swept (192.0.2.x), so a fresh install,
+        // or one whose saved IP came from another network, never reached the TV.
+        let wifi = try XCTUnwrap(LocalIPv4Network("en0", "10.20.30.40", "255.255.255.0"))
+        let hosts = LGTVDiscovery.sweepHosts(around: TVConfig.default.host, networks: [wifi])
+        XCTAssertEqual(hosts.count, 253, "every host of the /24 but the iPhone itself")
+        XCTAssertEqual(hosts.first, "10.20.30.1")
+        XCTAssertEqual(hosts.last, "10.20.30.254")
+        XCTAssertTrue(hosts.contains("10.20.30.10"))
+        XCTAssertFalse(hosts.contains("10.20.30.40"), "never the iPhone's own address")
+        XCTAssertFalse(hosts.contains("10.20.30.0") || hosts.contains("10.20.30.255"), "no network or broadcast address")
+        XCTAssertFalse(hosts.contains { $0.hasPrefix("192.0.2.") }, "the default IP is no LAN to sweep")
+    }
+
+    func testSweepAddsTheSavedIPsOtherLANAndCapsWideNetworks() throws {
+        let wifi = try XCTUnwrap(LocalIPv4Network("en0", "10.20.30.40", "255.255.255.0"))
+        let behindRouter = LGTVDiscovery.sweepHosts(around: "192.168.77.20", networks: [wifi])
+        XCTAssertEqual(behindRouter.count, 253 + 254)
+        XCTAssertEqual(behindRouter[252], "10.20.30.254", "the iPhone's own subnet first")
+        XCTAssertEqual(behindRouter[253], "192.168.77.1")
+
+        let sameLAN = LGTVDiscovery.sweepHosts(around: "10.20.30.99", networks: [wifi])
+        XCTAssertEqual(sameLAN.count, 253, "a saved IP inside the swept network adds nothing")
+
+        let wide22 = try XCTUnwrap(LocalIPv4Network("en0", "10.1.5.7", "255.255.252.0"))
+        let hosts22 = LGTVDiscovery.sweepHosts(around: nil, networks: [wide22])
+        XCTAssertEqual(hosts22.count, 1021, "a /22 is swept whole: 10.1.4.1 to 10.1.7.254")
+        XCTAssertEqual(hosts22.first, "10.1.4.1")
+        XCTAssertEqual(hosts22.last, "10.1.7.254")
+
+        let wide16 = try XCTUnwrap(LocalIPv4Network("en0", "172.16.5.9", "255.255.0.0"))
+        let hosts16 = LGTVDiscovery.sweepHosts(around: nil, networks: [wide16])
+        XCTAssertEqual(hosts16.count, 253, "wider than /22: only the iPhone's own /24")
+        XCTAssertEqual(hosts16.first, "172.16.5.1")
+
+        XCTAssertTrue(LGTVDiscovery.sweepHosts(around: "invalid", networks: []).isEmpty)
+    }
+
+    func testLocalNetworksAreWiFiOrEthernetWithPrivateAddresses() {
+        for network in LGTVDiscovery.localIPv4Networks() {
+            XCTAssertTrue(network.interface.hasPrefix("en"), network.interface)
+            XCTAssertTrue(LGTVDiscovery.isPrivate(network.address))
+        }
+        XCTAssertTrue(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("10.0.0.1")!))
+        XCTAssertTrue(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("172.31.255.1")!))
+        XCTAssertTrue(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("192.168.0.1")!))
+        XCTAssertFalse(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("172.32.0.1")!))
+        XCTAssertFalse(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("192.0.2.100")!))
+        XCTAssertFalse(LGTVDiscovery.isPrivate(LGTVDiscovery.ipv4Value("169.254.3.4")!))
+        XCTAssertEqual(LGTVDiscovery.ipv4String(LGTVDiscovery.ipv4Value("10.20.30.40")!), "10.20.30.40")
+    }
+
+    func testConnectScanFindsTheOpenPortOnly() async throws {
+        let listener = try LoopbackListener()
+        defer { listener.close() }
+        let open = await LGTVDiscovery.hostsAcceptingTCP(["127.0.0.1"], port: Int(listener.port), timeout: 1.0)
+        XCTAssertEqual(open, ["127.0.0.1"])
+
+        let closedPort = listener.port == 65535 ? listener.port - 1 : listener.port + 1
+        let refused = await LGTVDiscovery.hostsAcceptingTCP(["127.0.0.1", "not-an-ip"], port: Int(closedPort), timeout: 1.0)
+        XCTAssertTrue(refused.isEmpty, "refused connections and invalid addresses are not TVs")
+    }
+
+    func testFirstTVPicksTheHostAnsweringROAP() async {
+        URLProtocol.registerClass(TVStub.self)
+        defer { URLProtocol.unregisterClass(TVStub.self) }
+        let tv = await LGTVDiscovery.firstTV(among: [TVStub.host], port: 8080, timeout: 1.0)
+        XCTAssertEqual(tv, TVStub.host)
+        let none = await LGTVDiscovery.firstTV(among: [], port: 8080)
+        XCTAssertNil(none)
+    }
+
+    /// Opt-in check against the real TV on this LAN, the way an iPhone finds it (no SSDP):
+    /// `TEST_RUNNER_LANREMOTE_LIVE_TV=1 xcodebuild test ... -only-testing:LanRemoteTests/LanRemoteTests/testLiveSweepFindsTheTVWithoutSSDP`
+    func testLiveSweepFindsTheTVWithoutSSDP() async throws {
+        guard ProcessInfo.processInfo.environment["LANREMOTE_LIVE_TV"] == "1" else {
+            throw XCTSkip("needs a LG NetCast TV on the LAN: set LANREMOTE_LIVE_TV=1")
+        }
+        let started = Date()
+        let host = await LGTVDiscovery.locate(matching: .default, ssdp: false)
+        let elapsed = Date().timeIntervalSince(started)
+        let found = try XCTUnwrap(host, "the sweep of the device's own subnet must find the TV")
+        let answers = await LGTVDiscovery.probeHost(found)
+        XCTAssertTrue(answers)
+        XCTAssertLessThan(elapsed, 15)
+        print("live sweep: TV found in \(String(format: "%.1f", elapsed)) s")
     }
 
     func testAutomaticSearchIsDLNAOnly() {
@@ -484,6 +597,7 @@ final class LanRemoteTests: XCTestCase {
         client.pingProbe = { _ in pingAlive }
         client.foreignHostProbe = { _ in foreignOpen }
         client.locateProbe = { _ in nil }
+        client.networkBlockProbe = { _, _ in nil }
 
         // 1. Deaf HTTP server with active ping: stays On (notAnswering), never marked Off
         DeafTVStub.set(.deaf)
@@ -558,6 +672,7 @@ final class LanRemoteTests: XCTestCase {
         activeClient.pingProbe = { _ in true }
         activeClient.foreignHostProbe = { _ in foreignOpen }
         activeClient.locateProbe = { _ in nil }
+        activeClient.networkBlockProbe = { _, _ in nil }
         DeafTVStub.set(.answering)
         await activeClient.refreshStatus()
         XCTAssertEqual(activeClient.powerState, .on)
@@ -574,6 +689,7 @@ final class LanRemoteTests: XCTestCase {
         coldClient.pingProbe = { _ in true }
         coldClient.foreignHostProbe = { _ in true }
         coldClient.locateProbe = { _ in nil }
+        coldClient.networkBlockProbe = { _, _ in nil }
         await coldClient.refreshStatus()
         XCTAssertEqual(coldClient.powerState, .off)
         XCTAssertFalse(coldClient.notAnswering)
@@ -584,16 +700,110 @@ final class LanRemoteTests: XCTestCase {
         migratingClient.pingProbe = { _ in true }
         migratingClient.foreignHostProbe = { _ in true }
         migratingClient.locateProbe = { _ in DeafTVStub.relocatedHost }
+        migratingClient.networkBlockProbe = { _, _ in nil }
         await migratingClient.refreshStatus()
         XCTAssertEqual(migratingClient.config.host, DeafTVStub.relocatedHost)
         XCTAssertEqual(migratingClient.powerState, .on)
         XCTAssertFalse(migratingClient.notAnswering)
         XCTAssertFalse(migratingClient.ipConflict)
     }
+
+    @MainActor
+    func testBlockedNetworkIsNotReportedAsTVOff() async throws {
+        URLProtocol.registerClass(DeafTVStub.self)
+        defer { URLProtocol.unregisterClass(DeafTVStub.self) }
+        DeafTVStub.reset()
+
+        var config = TVConfig.default
+        config.host = DeafTVStub.host
+        config.pairingKey = "123456"
+        config.session = "111222"
+        let client = LGTVClient(config: config, autoStart: false)
+        var block: NetworkBlock? = .localNetworkDenied
+        client.pingProbe = { _ in false }
+        client.foreignHostProbe = { _ in false }
+        client.locateProbe = { _ in nil }
+        client.networkBlockProbe = { _, _ in block }
+
+        // 1. Nothing answers and iOS denies local network access: unknown and blocked, not "off"
+        DeafTVStub.set(.deaf)
+        await client.refreshStatus()
+        XCTAssertEqual(client.networkBlock, .localNetworkDenied)
+        XCTAssertEqual(client.powerState, .unknown)
+        XCTAssertFalse(client.notAnswering)
+
+        // 2. Keys don't queue up behind a blocked network: the banner is pointed at instead
+        let pulse = client.attentionPulse
+        client.sendKey(.volumeUp)
+        XCTAssertEqual(client.attentionPulse, pulse + 1)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(DeafTVStub.keys.isEmpty)
+
+        // 3. URLSession's "offline" error (what a denial looks like) skips the pointless subnet search
+        //    (a fresh client: its first failure would search otherwise)
+        let searches = Counter()
+        let fresh = LGTVClient(config: config, autoStart: false)
+        fresh.pingProbe = { _ in false }
+        fresh.foreignHostProbe = { _ in false }
+        fresh.locateProbe = { _ in searches.increment(); return nil }
+        fresh.networkBlockProbe = { _, _ in .offWiFi }
+        DeafTVStub.set(.offline)
+        await fresh.refreshStatus()
+        XCTAssertEqual(fresh.networkBlock, .offWiFi)
+        XCTAssertEqual(fresh.powerState, .unknown)
+        XCTAssertEqual(searches.value, 0, "no sweep while the iPhone can't reach the LAN")
+
+        // 4. Access back: the TV answers and the block clears
+        block = nil
+        DeafTVStub.set(.answering)
+        await client.refreshStatus()
+        XCTAssertNil(client.networkBlock)
+        XCTAssertEqual(client.powerState, .on)
+
+        // 5. Nothing answers but the network is fine: standby, as before
+        DeafTVStub.set(.deaf)
+        await client.refreshStatus()
+        XCTAssertNil(client.networkBlock)
+        XCTAssertEqual(client.powerState, .off)
+    }
+
+    @MainActor
+    func testTVRefusingTheAppAsksForPairingInsteadOfNotAnswering() async throws {
+        URLProtocol.registerClass(DeafTVStub.self)
+        defer { URLProtocol.unregisterClass(DeafTVStub.self) }
+        DeafTVStub.reset()
+
+        var config = TVConfig.default
+        config.host = DeafTVStub.host
+        config.pairingKey = nil
+        let client = LGTVClient(config: config, autoStart: false)
+        client.pingProbe = { _ in true }
+        client.foreignHostProbe = { _ in false }
+        client.locateProbe = { _ in nil }
+        client.networkBlockProbe = { _, _ in nil }
+
+        // No key saved: the TV answered 401, so it is on and only pairing helps
+        DeafTVStub.set(.refusing)
+        await client.refreshStatus()
+        XCTAssertEqual(client.powerState, .on)
+        XCTAssertTrue(client.needsPairing)
+        XCTAssertFalse(client.notAnswering, "the TV did answer: not \"sem resposta\"")
+
+        // A saved key the TV rejects: same
+        client.config.pairingKey = "123456"
+        await client.refreshStatus()
+        XCTAssertTrue(client.needsPairing)
+
+        // Paired again: cleared
+        DeafTVStub.set(.answering)
+        await client.refreshStatus()
+        XCTAssertFalse(client.needsPairing)
+        XCTAssertEqual(client.powerState, .on)
+    }
 }
 
 private final class DeafTVStub: URLProtocol {
-    enum Mode { case deaf, answering }
+    enum Mode { case deaf, answering, offline, refusing }
     static let host = "192.0.2.78"
     static let relocatedHost = "192.0.2.79"
 
@@ -639,8 +849,19 @@ private final class DeafTVStub: URLProtocol {
     override func startLoading() {
         guard let url = request.url else { return }
         let isRelocated = (url.host == Self.relocatedHost)
-        if !isRelocated, Self.lock.withLock({ Self._mode }) == .deaf {
+        let mode = Self.lock.withLock { Self._mode }
+        if !isRelocated, mode == .deaf {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
+        if !isRelocated, mode == .offline {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        if !isRelocated, mode == .refusing {
+            let resp = HTTPURLResponse(url: url, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
             return
         }
 
@@ -728,4 +949,43 @@ private final class TVStub: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+/// A TCP listener on 127.0.0.1 at a port the kernel picks, for the connect scan.
+private final class LoopbackListener {
+    let fd: Int32
+    let port: UInt16
+
+    init() throws {
+        let socketFD = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard socketFD >= 0 else { throw POSIXError(.EMFILE) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bound = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard bound == 0, listen(socketFD, 8) == 0 else {
+            Darwin.close(socketFD)
+            throw POSIXError(.EADDRINUSE)
+        }
+        var actual = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &actual) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketFD, $0, &len) }
+        }
+        fd = socketFD
+        port = UInt16(bigEndian: actual.sin_port)
+    }
+
+    func close() { Darwin.close(fd) }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }

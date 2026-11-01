@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RemoteView: View {
     @ObservedObject var client: LGTVClient
@@ -13,6 +14,8 @@ struct RemoteView: View {
 
     /// Keys can't reach the TV right now: dim the remote and show how to switch it on.
     private var tvAsleep: Bool { client.powerState == .off || client.powerState == .turningOn }
+    /// Keys can't leave the iPhone at all (off Wi-Fi, or local network access denied).
+    private var remoteUnavailable: Bool { tvAsleep || client.networkBlock != nil }
 
     var body: some View {
         ZStack {
@@ -38,9 +41,15 @@ struct RemoteView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 14) {
-                        // MARK: - How to switch the TV on (only while it is off)
-                        if tvAsleep {
+                        // MARK: - What keeps the remote from reaching the TV, and the way out
+                        if let block = client.networkBlock {
+                            NetworkBlockBanner(block: block, attentionPulse: client.attentionPulse)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        } else if tvAsleep {
                             PowerBanner(client: client, openSettings: { showSettings = true })
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        } else if client.needsPairing {
+                            PairingBanner(openSettings: { showSettings = true })
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
@@ -63,11 +72,11 @@ struct RemoteView: View {
                             mediaSection
                             colorKeysSection
                         }
-                        .opacity(tvAsleep ? 0.45 : 1)
+                        .opacity(remoteUnavailable ? 0.45 : 1)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .animation(.easeInOut(duration: 0.2), value: tvAsleep)
+                    .animation(.easeInOut(duration: 0.2), value: remoteUnavailable)
                 }
 
                 // MARK: - What the control being held does
@@ -149,7 +158,7 @@ struct RemoteView: View {
                             .lineLimit(1)
                     }
 
-                    if client.powerState == .on, !client.notAnswering {
+                    if client.powerState == .on, !client.notAnswering, !client.needsPairing {
                         Text("•")
                             .font(.system(size: 10))
                             .foregroundColor(Color(white: 0.4))
@@ -186,9 +195,15 @@ struct RemoteView: View {
     }
 
     private var statusText: String {
+        switch client.networkBlock {
+        case .offWiFi: return "iPhone fora do Wi-Fi"
+        case .localNetworkDenied: return "Sem acesso à rede local"
+        case nil: break
+        }
         switch client.powerState {
         case .on:
             if client.ipConflict { return "Ligada · conflito de IP" }
+            if client.needsPairing { return "Ligada · falta parear" }
             return client.notAnswering ? "Ligada · sem resposta" : "Ligada"
         case .off: return "Desligada"
         case .turningOn: return "Ligando…"
@@ -197,8 +212,9 @@ struct RemoteView: View {
     }
 
     private var statusColor: Color {
+        if client.networkBlock != nil { return Color.orange }
         switch client.powerState {
-        case .on: return client.notAnswering ? Color.orange : Color.green
+        case .on: return client.notAnswering || client.needsPairing ? Color.orange : Color.green
         case .off: return Color(red: 0.95, green: 0.35, blue: 0.3)
         case .turningOn: return Color(red: 0.4, green: 0.7, blue: 1.0)
         case .unknown: return Color(white: 0.55)
@@ -452,5 +468,114 @@ private struct PowerBanner: View {
             return "Toque em Ligar: a \(box.name) liga a TV pelo HDMI. A imagem volta em segundos; o controle, em até 1 minuto."
         }
         return "Em standby esta TV desliga a rede. Dá para ligá-la pela TV Box ligada no HDMI: configure uma vez."
+    }
+}
+
+/// The iPhone can't reach the LAN: off Wi-Fi, or iOS denies the app local network access (which looked
+/// like a TV that had vanished: "Desligada", and no TV in the search).
+private struct NetworkBlockBanner: View {
+    let block: NetworkBlock
+    let attentionPulse: Int
+    @State private var nudge = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.33, green: 0.22, blue: 0.10))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: block == .offWiFi ? "wifi.slash" : "lock.shield")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(message)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(white: 0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Button(action: openSystemSettings) {
+                Label(block == .offWiFi ? "Abrir Ajustes" : "Abrir Ajustes do app", systemImage: "gearshape")
+            }
+            .buttonStyle(RemoteButtonStyle(bg: Color(red: 0.15, green: 0.40, blue: 0.65), height: 44, cornerRadius: 11))
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.19, green: 0.14, blue: 0.09)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(nudge ? Color.orange : Color(red: 0.48, green: 0.33, blue: 0.16), lineWidth: nudge ? 2 : 1)
+        )
+        .scaleEffect(nudge ? 1.02 : 1)
+        .onChange(of: attentionPulse) {
+            withAnimation(.easeOut(duration: 0.12)) { nudge = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.easeIn(duration: 0.25)) { nudge = false }
+            }
+        }
+    }
+
+    private var title: String {
+        block == .offWiFi ? "O iPhone está fora do Wi-Fi" : "Permita o acesso à rede local"
+    }
+
+    private var message: String {
+        switch block {
+        case .offWiFi:
+            return "O controle fala com a TV pela rede Wi-Fi de casa. Conecte o iPhone à mesma rede da TV."
+        case .localNetworkDenied:
+            return "O iOS está bloqueando o app na rede de casa, então ele não enxerga a TV. Em Ajustes › Lan Remote, ligue Rede Local. Se já estiver ligada, desligue e ligue de novo."
+        }
+    }
+
+    private func openSystemSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+    }
+}
+
+/// The TV answers but refuses the app: no pairing key saved, or one the TV no longer accepts.
+private struct PairingBanner: View {
+    let openSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.17, green: 0.25, blue: 0.33))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "key.horizontal")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color(red: 0.55, green: 0.78, blue: 1.0))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pareie o app com a TV")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("A TV foi encontrada, mas ainda não aceita este iPhone. Em Ajustes, toque em Pedir Código na TV e digite os 6 números que aparecem na tela.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(white: 0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Button(action: openSettings) {
+                Label("Parear", systemImage: "key.horizontal")
+            }
+            .buttonStyle(RemoteButtonStyle(bg: Color(red: 0.15, green: 0.40, blue: 0.65), height: 44, cornerRadius: 11))
+            .controlHelp(Help.settings)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.11, green: 0.15, blue: 0.19)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(red: 0.24, green: 0.36, blue: 0.48), lineWidth: 1))
     }
 }

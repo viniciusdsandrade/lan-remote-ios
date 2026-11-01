@@ -24,6 +24,39 @@ struct DiscoveredTV: Identifiable, Equatable, Hashable, Sendable {
     }
 }
 
+// MARK: - The iPhone's own network
+
+/// An IPv4 network this device is on through Wi-Fi or Ethernet (`en*`), read with getifaddrs.
+/// Addresses are in host byte order.
+struct LocalIPv4Network: Equatable, Sendable {
+    let interface: String
+    let address: UInt32
+    let netmask: UInt32
+
+    init(interface: String, address: UInt32, netmask: UInt32) {
+        self.interface = interface
+        self.address = address
+        self.netmask = netmask
+    }
+
+    /// Parses dotted quads, as in tests: `LocalIPv4Network("en0", "192.0.2.5", "255.255.255.0")`.
+    init?(_ interface: String, _ address: String, _ netmask: String) {
+        guard let address = LGTVDiscovery.ipv4Value(address),
+              let netmask = LGTVDiscovery.ipv4Value(netmask) else { return nil }
+        self.init(interface: interface, address: address, netmask: netmask)
+    }
+
+    var prefixLength: Int { netmask.nonzeroBitCount }
+}
+
+/// Why the app can't reach anything on the LAN, whatever the TV is doing.
+enum NetworkBlock: Equatable, Sendable {
+    /// The iPhone has no IPv4 address on Wi-Fi (or Ethernet): off Wi-Fi, or only on cellular.
+    case offWiFi
+    /// iOS refuses the app local network access (Settings › Privacy & Security › Local Network).
+    case localNetworkDenied
+}
+
 // MARK: - LG TV Discovery & Relocation Engine
 
 enum LGTVDiscovery {
@@ -243,23 +276,251 @@ enum LGTVDiscovery {
         return await probeHost(config.host, port: port) ? config.host : nil
     }
 
-    /// Locates the LG TV matching `config` by DLNA discovery, or fast subnet sweep.
+    /// Locates the LG TV matching `config` by DLNA discovery, or by sweeping the iPhone's own subnet.
     /// It runs by itself whenever the TV stops answering, so it never uses the UDAP search.
-    static func locate(matching config: TVConfig) async -> String? {
+    /// On an iPhone the sweep is what finds the TV: iOS refuses multicast and broadcast to apps without
+    /// the multicast entitlement (Apple grants it on request only, never to a free developer account),
+    /// so the SSDP search gets no answer there. `ssdp: false` skips it, as tests of the sweep do.
+    static func locate(matching config: TVConfig, ssdp: Bool = true) async -> String? {
         let port = config.port > 0 ? config.port : defaultPort
 
         // 1. SSDP DLNA M-SEARCH
-        if let host = match(config, in: await search(timeout: 2.0)) {
+        if ssdp, let host = match(config, in: await search(timeout: 2.0)) {
             return host
         }
 
-        // 2. Fallback subnet sweep (if SSDP was blocked by Wi-Fi AP isolation or multicast filter)
-        let prefix = detectSubnetPrefix(from: config.host) ?? "192.168.1"
-        if let sweepMatch = await quickSubnetSweep(prefix: prefix, port: port) {
-            return sweepMatch
+        // 2. Sweep of the subnet the iPhone is on (plus the saved IP's /24 when it is another LAN)
+        let hosts = sweepHosts(around: config.host, networks: localIPv4Networks())
+        for chunk in stride(from: 0, to: hosts.count, by: sweepChunk).map({ Array(hosts[$0..<min($0 + sweepChunk, hosts.count)]) }) {
+            let open = await hostsAcceptingTCP(chunk, port: port)
+            if let tv = await firstTV(among: open, port: port) {
+                return tv
+            }
+        }
+        return nil
+    }
+
+    // MARK: Subnet sweep
+
+    /// Sockets connecting at once during a sweep: well under the 256 file descriptors an app gets by default.
+    static let sweepChunk = 96
+    /// How long a sweep waits for the TCP handshakes of one chunk. The TV's kernel answers the SYN even
+    /// while its ROAP server stalls, so this only has to cover Wi-Fi latency and ARP.
+    static let sweepConnectTimeout: TimeInterval = 1.2
+    /// How long a host that accepted the connection on 8080 has to answer the ROAP probe.
+    static let sweepProbeTimeout: TimeInterval = 2.5
+
+    /// The IPv4 networks this device is on through Wi-Fi or Ethernet, with private addresses only
+    /// (no cellular, VPN, AWDL, hotspot bridge or link-local address).
+    static func localIPv4Networks() -> [LocalIPv4Network] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+
+        var networks: [LocalIPv4Network] = []
+        for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let entry = pointer.pointee
+            let flags = Int32(entry.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_RUNNING) != 0, (flags & IFF_LOOPBACK) == 0,
+                  let addr = entry.ifa_addr, addr.pointee.sa_family == sa_family_t(AF_INET),
+                  let mask = entry.ifa_netmask else { continue }
+            let name = String(cString: entry.ifa_name)
+            guard name.hasPrefix("en") else { continue }
+            let address = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            let netmask = mask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            guard isPrivate(address) else { continue }
+            let network = LocalIPv4Network(interface: name, address: address, netmask: netmask)
+            if !networks.contains(network) { networks.append(network) }
+        }
+        return networks
+    }
+
+    /// The addresses a sweep tries, in order: every host of each network the device is on (the device's
+    /// own /24 when the network is wider than /22), then the saved IP's /24 when it is a private network
+    /// the device isn't on (a TV behind a second router). Deriving the subnet from the saved IP alone,
+    /// as before, swept 192.0.2.x with the factory default and never reached the TV.
+    static func sweepHosts(around savedHost: String?, networks: [LocalIPv4Network]) -> [String] {
+        var ordered: [UInt32] = []
+        var seen = Set<UInt32>()
+        var own = Set<UInt32>()
+        var covered: [(base: UInt32, mask: UInt32)] = []
+
+        func add(base: UInt32, mask: UInt32) {
+            covered.append((base, mask))
+            let broadcast = base | ~mask
+            guard broadcast > base + 1 else { return }
+            for value in (base + 1)..<broadcast where !own.contains(value) && seen.insert(value).inserted {
+                ordered.append(value)
+            }
         }
 
-        return nil
+        for network in networks { own.insert(network.address) }
+        for network in networks {
+            let mask: UInt32 = network.prefixLength >= 22 ? network.netmask : 0xFFFF_FF00
+            add(base: network.address & mask, mask: mask)
+        }
+        if let savedHost, let saved = ipv4Value(savedHost), isPrivate(saved),
+           !covered.contains(where: { saved & $0.mask == $0.base }) {
+            add(base: saved & 0xFFFF_FF00, mask: 0xFFFF_FF00)
+        }
+        return ordered.map(ipv4String)
+    }
+
+    /// The hosts among `hosts` that accept a TCP connection on `port` within `timeout`: non-blocking
+    /// connects in parallel, so a whole /24 takes a few seconds even with most addresses unused.
+    static func hostsAcceptingTCP(_ hosts: [String], port: Int, timeout: TimeInterval = sweepConnectTimeout) async -> [String] {
+        guard let port = UInt16(exactly: port) else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            connectScan(hosts, port: port, timeout: timeout)
+        }.value
+    }
+
+    /// The first of `hosts` that answers the ROAP probe like an LG NetCast TV, probing them in parallel.
+    static func firstTV(among hosts: [String], port: Int, timeout: TimeInterval = sweepProbeTimeout) async -> String? {
+        guard !hosts.isEmpty else { return nil }
+        return await withTaskGroup(of: String?.self) { group -> String? in
+            for host in hosts {
+                group.addTask { await probeHost(host, port: port, timeout: timeout) ? host : nil }
+            }
+            for await result in group {
+                if let result {
+                    group.cancelAll()
+                    return result
+                }
+            }
+            return nil
+        }
+    }
+
+    private static func connectScan(_ hosts: [String], port: UInt16, timeout: TimeInterval) -> [String] {
+        var open: [String] = []
+        var pending: [(fd: Int32, host: String)] = []
+        defer {
+            for socketInFlight in pending { Darwin.close(socketInFlight.fd) }
+        }
+
+        for host in hosts {
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { continue }
+            let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+            guard fd >= 0 else { continue }
+            var on: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+            let rc = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    Darwin.connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if rc == 0 {
+                open.append(host)
+                Darwin.close(fd)
+            } else if errno == EINPROGRESS {
+                pending.append((fd, host))
+            } else {
+                Darwin.close(fd)
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while !pending.isEmpty {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            var pfds = pending.map { pollfd(fd: $0.fd, events: Int16(POLLOUT), revents: 0) }
+            let ready = poll(&pfds, nfds_t(pfds.count), Int32(ceil(remaining * 1000)))
+            if ready < 0 && errno == EINTR { continue }
+            guard ready > 0 else { break }
+
+            var stillPending: [(fd: Int32, host: String)] = []
+            for (index, pfd) in pfds.enumerated() {
+                guard pfd.revents != 0 else {
+                    stillPending.append(pending[index])
+                    continue
+                }
+                var soErr: Int32 = -1
+                var soLen = socklen_t(MemoryLayout<Int32>.size)
+                if (pfd.revents & Int16(POLLERR | POLLHUP | POLLNVAL)) == 0,
+                   getsockopt(pfd.fd, SOL_SOCKET, SO_ERROR, &soErr, &soLen) == 0, soErr == 0 {
+                    open.append(pending[index].host)
+                }
+                Darwin.close(pfd.fd)
+            }
+            pending = stillPending
+        }
+        return open
+    }
+
+    // MARK: What blocks the LAN
+
+    /// Whether the app can't reach the LAN at all, so a TV that doesn't answer isn't necessarily off:
+    /// no Wi-Fi address, or local network access denied by iOS. `host` should be on the LAN (the TV's
+    /// IP); otherwise the first address of the iPhone's subnet stands in for it (usually the router).
+    /// Denial shows at once as an unsatisfied path; when access is allowed this returns within `timeout`.
+    static func networkBlock(near host: String, port: Int = defaultPort, timeout: TimeInterval = 0.5) async -> NetworkBlock? {
+        let networks = localIPv4Networks()
+        guard let network = networks.first else { return .offWiFi }
+        var target = (host: host, port: port)
+        if let value = ipv4Value(host), !networks.contains(where: { value & $0.netmask == $0.address & $0.netmask }) {
+            let base = network.address & network.netmask
+            let guess = base + 1 == network.address ? base + 2 : base + 1
+            target = (ipv4String(guess), 80)
+        }
+        return await isLocalNetworkDenied(host: target.host, port: target.port, timeout: timeout) ? .localNetworkDenied : nil
+    }
+
+    static func isLocalNetworkDenied(host: String, port: Int, timeout: TimeInterval) async -> Bool {
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else { return false }
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let queue = DispatchQueue(label: "lanremote.localnetwork-check")
+        return await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var finished = false
+            let finish: (Bool) -> Void = { denied in
+                let first = lock.withLock { () -> Bool in
+                    defer { finished = true }
+                    return !finished
+                }
+                guard first else { return }
+                connection.stateUpdateHandler = nil
+                connection.cancel()
+                continuation.resume(returning: denied)
+            }
+            let deniedNow: () -> Bool = {
+                guard let path = connection.currentPath, path.status != .satisfied else { return false }
+                return path.unsatisfiedReason == .localNetworkDenied
+            }
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready, .cancelled: finish(false)
+                case .waiting, .failed: finish(deniedNow())
+                default: break
+                }
+            }
+            connection.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + timeout) { finish(deniedNow()) }
+        }
+    }
+
+    // MARK: IPv4 helpers
+
+    static func ipv4Value(_ text: String) -> UInt32? {
+        var addr = in_addr()
+        guard inet_pton(AF_INET, text, &addr) == 1 else { return nil }
+        return UInt32(bigEndian: addr.s_addr)
+    }
+
+    static func ipv4String(_ value: UInt32) -> String {
+        "\(value >> 24).\((value >> 16) & 0xFF).\((value >> 8) & 0xFF).\(value & 0xFF)"
+    }
+
+    /// RFC 1918 ranges: 10/8, 172.16/12, 192.168/16.
+    static func isPrivate(_ value: UInt32) -> Bool {
+        (value & 0xFF00_0000) == 0x0A00_0000
+            || (value & 0xFFF0_0000) == 0xAC10_0000
+            || (value & 0xFFFF_0000) == 0xC0A8_0000
     }
 
     private static func match(_ config: TVConfig, in found: [DiscoveredTV]) -> String? {
@@ -299,38 +560,9 @@ enum LGTVDiscovery {
         return results
     }
 
-    /// Fast parallel check across common host range on subnet.
-    static func quickSubnetSweep(prefix: String, port: Int = defaultPort) async -> String? {
-        // Sweep common DHCP range first (2 to 50, then 51 to 254)
-        let priorityHosts = (2...50).map { "\(prefix).\($0)" }
-        let remainingHosts = (51...254).map { "\(prefix).\($0)" }
-
-        for batch in [priorityHosts, remainingHosts] {
-            let found: String? = await withTaskGroup(of: String?.self) { group -> String? in
-                for host in batch {
-                    group.addTask {
-                        if await probeHost(host, port: port, timeout: 0.6) {
-                            return host
-                        }
-                        return nil
-                    }
-                }
-                for await result in group {
-                    if let result = result {
-                        group.cancelAll()
-                        return result
-                    }
-                }
-                return nil
-            }
-            if let found = found {
-                return found
-            }
-        }
-        return nil
-    }
-
     /// Sends the SSDP searches (DLNA, or with `udap` M-SEARCH and B-SEARCH) and collects sender IP addresses.
+    /// When iOS refuses every send (no multicast entitlement: sendto fails with EHOSTUNREACH), no answer
+    /// can come, so it returns at once instead of waiting `timeout` for nothing.
     private static func discoverCandidates(timeout: TimeInterval, udap: Bool) -> [String] {
         let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { return [] }
@@ -344,10 +576,11 @@ enum LGTVDiscovery {
         if udap {
             let msearchRootservice = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
             let bsearchRootservice = "B-SEARCH * HTTP/1.1\r\nHOST: 255.255.255.255:1990\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: udap:rootservice\r\nUSER-AGENT: iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0\r\n\r\n"
-            sendUDP(payload: msearchRootservice, to: "239.255.255.250", port: ssdpPort, fd: fd)
-            sendUDP(payload: bsearchRootservice, to: "255.255.255.255", port: bcastPort, fd: fd)
+            let sentM = sendUDP(payload: msearchRootservice, to: "239.255.255.250", port: ssdpPort, fd: fd)
+            let sentB = sendUDP(payload: bsearchRootservice, to: "255.255.255.255", port: bcastPort, fd: fd)
+            guard sentM || sentB else { return [] }
         } else {
-            sendUDP(payload: dlnaSearch, to: "239.255.255.250", port: ssdpPort, fd: fd)
+            guard sendUDP(payload: dlnaSearch, to: "239.255.255.250", port: ssdpPort, fd: fd) else { return [] }
         }
 
         var foundIPs = Set<String>()
@@ -387,29 +620,36 @@ enum LGTVDiscovery {
         return Array(foundIPs)
     }
 
-    private static func sendUDP(payload: String, to host: String, port: UInt16, fd: Int32) {
-        guard let data = payload.data(using: .utf8) else { return }
+    @discardableResult
+    private static func sendUDP(payload: String, to host: String, port: UInt16, fd: Int32) -> Bool {
+        guard let data = payload.data(using: .utf8) else { return false }
         var dest = sockaddr_in()
         dest.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port = port.bigEndian
-        guard inet_pton(AF_INET, host, &dest.sin_addr) == 1 else { return }
+        guard inet_pton(AF_INET, host, &dest.sin_addr) == 1 else { return false }
 
-        _ = data.withUnsafeBytes { bytes in
+        let sent = data.withUnsafeBytes { bytes in
             withUnsafePointer(to: &dest) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
                     sendto(fd, bytes.baseAddress, bytes.count, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
         }
+        if sent < 0 {
+            let code = errno
+            NSLog("LG TV: o iOS recusou a busca SSDP para %@ (errno %d); a TV será procurada pela varredura da rede", host, code)
+            return false
+        }
+        return true
     }
 
     /// Fetches details from rootservice.xml (with `udap`) or volume_info on the candidate IP.
-    static func inspectTV(host: String, port: Int = defaultPort, udap: Bool) async -> DiscoveredTV? {
+    static func inspectTV(host: String, port: Int = defaultPort, udap: Bool, timeout: TimeInterval = 1.2) async -> DiscoveredTV? {
         // Try rootservice.xml with UDAP/2.0 User-Agent
         if udap, let url = URL(string: "http://\(host):\(port)/udap/api/data?target=rootservice.xml") {
             var req = URLRequest(url: url)
-            req.timeoutInterval = 1.2
+            req.timeoutInterval = timeout
             req.setValue("Close", forHTTPHeaderField: "Connection")
             req.setValue("iOS/1.0 UDAP/2.0 lg_roap_control/1.0.0", forHTTPHeaderField: "User-Agent")
             if let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -430,7 +670,7 @@ enum LGTVDiscovery {
         }
 
         // Fallback: check if volume_info endpoint exists (returns 200 or 401)
-        if await probeHost(host, port: port, timeout: 1.0) {
+        if await probeHost(host, port: port, timeout: timeout) {
             return DiscoveredTV(
                 ip: host,
                 port: port,
@@ -441,14 +681,6 @@ enum LGTVDiscovery {
             )
         }
 
-        return nil
-    }
-
-    static func detectSubnetPrefix(from host: String) -> String? {
-        let parts = host.split(separator: ".")
-        if parts.count == 4 {
-            return "\(parts[0]).\(parts[1]).\(parts[2])"
-        }
         return nil
     }
 }
@@ -464,7 +696,7 @@ final class NetworkDiscovery: ObservableObject {
 
     private var scanTask: Task<Void, Never>?
 
-    func startScan(targetSubnet: String? = nil) {
+    func startScan() {
         guard !isScanning else { return }
         isScanning = true
         scanProgress = 0.0
@@ -491,16 +723,25 @@ final class NetworkDiscovery: ObservableObject {
                 self.addDevice(dev)
             }
 
-            // 3. Fallback subnet sweep
-            let subnet = targetSubnet ?? LGTVDiscovery.detectSubnetPrefix(from: current.host) ?? "192.168.1"
-            await self.scanSubnet(subnet)
+            // 3. Sweep of the iPhone's own subnet: on an iPhone the SSDP searches get no answer (no
+            // multicast entitlement), so this is what finds the TV
+            let hosts = LGTVDiscovery.sweepHosts(around: current.host, networks: LGTVDiscovery.localIPv4Networks())
+            await self.scanHosts(hosts)
+            if Task.isCancelled { return }
 
             self.isScanning = false
             self.scanProgress = 1.0
-            if self.discoveredDevices.isEmpty {
-                self.statusText = "Nenhuma TV encontrada automaticamente. Insira o IP manualmente."
-            } else {
+            if !self.discoveredDevices.isEmpty {
                 self.statusText = "\(self.discoveredDevices.count) TV(s) encontrada(s)"
+            } else {
+                switch await LGTVDiscovery.networkBlock(near: current.host, timeout: 1.0) {
+                case .offWiFi:
+                    self.statusText = "O iPhone está fora do Wi-Fi. Conecte-o à mesma rede da TV e busque de novo."
+                case .localNetworkDenied:
+                    self.statusText = "O iOS está bloqueando a rede local para o app: em Ajustes › Lan Remote, ligue Rede Local."
+                case nil:
+                    self.statusText = "Nenhuma TV encontrada automaticamente. Insira o IP manualmente."
+                }
             }
         }
     }
@@ -519,34 +760,34 @@ final class NetworkDiscovery: ObservableObject {
         }
     }
 
-    private func scanSubnet(_ subnetPrefix: String) async {
-        let totalHosts = 254
-        let batchSize = 25
+    /// Connects to port 8080 on every host (a chunk at a time) and inspects the ones that accept.
+    private func scanHosts(_ hosts: [String]) async {
+        let port = LGTVDiscovery.defaultPort
+        let chunk = LGTVDiscovery.sweepChunk
+        var done = 0
 
-        for batchStart in stride(from: 1, to: totalHosts, by: batchSize) {
+        for start in stride(from: 0, to: hosts.count, by: chunk) {
             if Task.isCancelled { break }
-            let batchEnd = min(batchStart + batchSize - 1, totalHosts)
+            let batch = hosts[start..<min(start + chunk, hosts.count)]
+                .filter { host in !self.discoveredDevices.contains(where: { $0.ip == host }) }
+            let open = await LGTVDiscovery.hostsAcceptingTCP(batch, port: port)
 
             await withTaskGroup(of: DiscoveredTV?.self) { group in
-                for i in batchStart...batchEnd {
-                    let host = "\(subnetPrefix).\(i)"
-                    if self.discoveredDevices.contains(where: { $0.ip == host }) {
-                        continue
-                    }
+                for host in open {
                     group.addTask {
-                        return await LGTVDiscovery.inspectTV(host: host, port: 8080, udap: true)
+                        await LGTVDiscovery.inspectTV(host: host, port: port, udap: true, timeout: LGTVDiscovery.sweepProbeTimeout)
                     }
                 }
-
                 for await device in group {
-                    if let device = device {
+                    if let device {
                         self.addDevice(device)
                     }
                 }
             }
 
-            self.scanProgress = Double(batchEnd) / Double(totalHosts)
-            self.statusText = "Varrendo \(subnetPrefix).x (\(batchEnd)/\(totalHosts))..."
+            done = min(start + chunk, hosts.count)
+            self.scanProgress = Double(done) / Double(max(hosts.count, 1))
+            self.statusText = "Varrendo a rede Wi-Fi (\(done)/\(hosts.count))..."
         }
     }
 }

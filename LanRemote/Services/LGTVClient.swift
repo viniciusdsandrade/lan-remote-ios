@@ -12,6 +12,11 @@ final class LGTVClient: ObservableObject {
     @Published var notAnswering: Bool = false
     /// Another device on the LAN answered at the TV's IP right after the TV was active there.
     @Published var ipConflict: Bool = false
+    /// The app can't reach the LAN at all (off Wi-Fi, or local network access denied by iOS), so the
+    /// TV's state is unknown rather than off.
+    @Published var networkBlock: NetworkBlock?
+    /// The TV answers but refuses the app (HTTP 401) and the saved pairing key, if any, doesn't work.
+    @Published var needsPairing: Bool = false
     @Published var isMuted: Bool = false
     @Published var volumeLevel: Int = 10
     @Published var inputSourceName: String = "---"
@@ -43,6 +48,7 @@ final class LGTVClient: ObservableObject {
     var pingProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.answersPing($0) }
     var foreignHostProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.hasForeignService($0) }
     var locateProbe: @Sendable (TVConfig) async -> String? = { await LGTVDiscovery.locate(matching: $0) }
+    var networkBlockProbe: @Sendable (String, Int) async -> NetworkBlock? = { await LGTVDiscovery.networkBlock(near: $0, port: $1) }
     private var poweredOffAt: Date?
     private var lastAnsweredAt: Date?
     private let ipConflictWindow: TimeInterval = 120
@@ -73,6 +79,7 @@ final class LGTVClient: ObservableObject {
             lastAnsweredAt = nil
             notAnswering = false
             ipConflict = false
+            needsPairing = false
         }
         config.host = trimmed
         config.port = port
@@ -155,7 +162,7 @@ final class LGTVClient: ObservableObject {
     // MARK: - Command Execution with Debounce
 
     func sendKey(_ key: TVKey) {
-        guard powerState != .off, powerState != .turningOn else {
+        guard powerState != .off, powerState != .turningOn, networkBlock == nil else {
             // Nothing to send to; point the user at the "turn on" banner instead of failing silently.
             attentionPulse += 1
             HapticManager.shared.warning()
@@ -247,6 +254,7 @@ final class LGTVClient: ObservableObject {
                         lastAnsweredAt = nil
                     } else {
                         markAnswering()
+                        needsPairing = false
                         self.powerState = .on
                     }
 
@@ -261,11 +269,16 @@ final class LGTVClient: ObservableObject {
                 } else if httpResp.statusCode == 401 && allowAuthRetry {
                     // Session expired or unauthenticated; attempt re-pairing
                     markAnswering()
-                    let success = await self.pairWithSavedKey()
-                    if success {
+                    switch await self.pairWithSavedKey() {
+                    case .paired:
                         await self.performSendKey(code: code, label: label, pressed: pressed,
                                                   allowAuthRetry: false, allowRelocate: false)
                         return
+                    case .rejected:
+                        markNeedsPairing()
+                        NSLog("LG TV: tecla %@ recusada, o app precisa ser pareado com a TV", label)
+                    case .noAnswer:
+                        NSLog("LG TV: tecla %@ perdida, a TV não respondeu ao pareamento", label)
                     }
                 } else {
                     let respStr = String(data: data, encoding: .utf8) ?? ""
@@ -273,6 +286,7 @@ final class LGTVClient: ObservableObject {
                 }
             }
         } catch {
+            if await networkBlockedFast(by: error) { return }
             if allowRelocate, await relocateTVIfNeeded() {
                 await performSendKey(code: code, label: label, pressed: pressed,
                                      allowAuthRetry: allowAuthRetry, allowRelocate: false)
@@ -284,7 +298,7 @@ final class LGTVClient: ObservableObject {
             case .ipConflict:
                 markNotAnswering(conflict: true)
             case .unreachable:
-                markUnreachable()
+                await resolveUnreachable()
                 return
             }
             guard Date().timeIntervalSince(pressed) < keyPatience else {
@@ -342,6 +356,7 @@ final class LGTVClient: ObservableObject {
         }
         notAnswering = false
         ipConflict = false
+        networkBlock = nil
         poweredOffAt = nil
         lastAnsweredAt = Date()
     }
@@ -350,9 +365,60 @@ final class LGTVClient: ObservableObject {
     private func markUnreachable() {
         notAnswering = false
         ipConflict = false
+        needsPairing = false
+        networkBlock = nil
         if powerState != .turningOn {
             powerState = .off
         }
+    }
+
+    /// Nothing answered at the TV's IP: standby, unless the iPhone can't reach the LAN at all, in which
+    /// case "off" would send the user looking for a problem with the TV.
+    private func resolveUnreachable() async {
+        if let block = await networkBlockProbe(config.host, config.port) {
+            markBlocked(block)
+        } else {
+            markUnreachable()
+        }
+    }
+
+    /// A request failed in a way that points at the iPhone rather than the TV (no Wi-Fi address, or
+    /// URLSession's "offline" error, which is what a local network denial looks like): checks for a
+    /// block before relocating, since a sweep can't find anything then.
+    private func networkBlockedFast(by error: Error) async -> Bool {
+        let offline = (error as? URLError)?.code == .notConnectedToInternet
+        guard offline || LGTVDiscovery.localIPv4Networks().isEmpty,
+              let block = await networkBlockProbe(config.host, config.port) else { return false }
+        markBlocked(block)
+        return true
+    }
+
+    private func markBlocked(_ block: NetworkBlock) {
+        if networkBlock != block {
+            NSLog("LG TV: sem acesso à rede local (%@), estado da TV desconhecido",
+                  block == .offWiFi ? "iPhone fora do Wi-Fi" : "permissão de Rede Local negada pelo iOS")
+        }
+        networkBlock = block
+        notAnswering = false
+        ipConflict = false
+        needsPairing = false
+        pendingKeys.removeAll()
+        if powerState != .turningOn {
+            powerState = .unknown
+        }
+    }
+
+    /// The TV answered with 401 and no saved key works: it is on, and only pairing will get keys through.
+    private func markNeedsPairing() {
+        if !needsPairing {
+            NSLog("LG TV: a TV recusou o app (HTTP 401) e não há chave de pareamento válida salva")
+        }
+        needsPairing = true
+        notAnswering = false
+        ipConflict = false
+        networkBlock = nil
+        powerState = .on
+        powerOnError = nil
     }
 
     // MARK: - Status Queries
@@ -394,6 +460,7 @@ final class LGTVClient: ObservableObject {
                 if let httpResp = resp as? HTTPURLResponse {
                     if httpResp.statusCode == 200 {
                         markAnswering()
+                        self.needsPairing = false
                         self.powerState = .on
                         self.powerOnError = nil
                         if let str = String(data: data, encoding: .utf8) {
@@ -406,7 +473,13 @@ final class LGTVClient: ObservableObject {
                         }
                     } else if httpResp.statusCode == 401 {
                         markAnswering()
-                        if await self.pairWithSavedKey() {
+                        let pairing = await self.pairWithSavedKey()
+                        if pairing == .rejected {
+                            markNeedsPairing()
+                            refreshBoxAddressIfNeeded()
+                            return
+                        }
+                        if pairing == .paired {
                             session = config.session ?? ""
                             if let retryReq = createRequest(path: "\(basePath)?target=volume_info&session=\(session)"),
                                let (rData, rResp) = try? await URLSession.shared.data(for: retryReq),
@@ -449,6 +522,11 @@ final class LGTVClient: ObservableObject {
                     }
                 }
             } catch {
+                // Off Wi-Fi or local network denied: nothing on the LAN answers, so neither the
+                // relocation nor the ping can tell anything about the TV.
+                if await networkBlockedFast(by: error) {
+                    return
+                }
                 // Check first whether DHCP moved the TV to another IP; otherwise use ping + foreign-port
                 // probe to tell standby apart from a transient HTTP stall or an active LAN IP conflict.
                 if allowRelocate, await relocateTVIfNeeded() {
@@ -461,7 +539,7 @@ final class LGTVClient: ObservableObject {
                 case .ipConflict:
                     markNotAnswering(conflict: true)
                 case .unreachable:
-                    markUnreachable()
+                    await resolveUnreachable()
                 }
                 refreshBoxAddressIfNeeded()
                 return   // no point asking for the channel as well
@@ -537,6 +615,7 @@ final class LGTVClient: ObservableObject {
             if let httpResp = resp as? HTTPURLResponse {
                 if httpResp.statusCode == 200 {
                     markAnswering()
+                    self.needsPairing = false
                     self.config.pairingKey = cleanKey
                     if let str = String(data: data, encoding: .utf8),
                        let session = Self.extractXMLTag(from: str, tag: "session") {
@@ -581,10 +660,16 @@ final class LGTVClient: ObservableObject {
         return (false, "Erro inesperado")
     }
 
-    private func pairWithSavedKey() async -> Bool {
+    private enum SavedKeyPairing { case paired, rejected, noAnswer }
+
+    /// Re-pairs with the saved key after a 401. `rejected` covers no key saved as well: either way only
+    /// pairing again (code on the TV screen) gets the app in.
+    private func pairWithSavedKey() async -> SavedKeyPairing {
         guard let key = config.pairingKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-              key.count >= 6 else { return false }
-        return await authenticateWithKey(key).success
+              key.count >= 6 else { return .rejected }
+        let result = await authenticateWithKey(key)
+        if result.success { return .paired }
+        return result.statusCode != nil ? .rejected : .noAnswer
     }
 
     // MARK: - Utilities
