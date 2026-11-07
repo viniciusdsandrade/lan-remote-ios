@@ -30,6 +30,12 @@ cd "$RAIZ"
 # como o build.sh e o CI: o projeto do Xcode sai do project.yml
 if command -v xcodegen >/dev/null; then xcodegen generate --quiet; fi
 
+APP="build/DerivedData-iphone/Build/Products/Release-iphoneos/LanRemote.app"
+# Sem fonte alterado, o build incremental copia o perfil renovado para dentro do .app mas não reassina:
+# o selo fica inválido ("a sealed resource is missing or invalid") e o iPhone não abre o app. Apagar o
+# .app força o Xcode a montá-lo e assiná-lo de novo, reaproveitando a compilação dos fontes.
+rm -rf "$APP"
+
 echo "==> Compilando (Release, assinado)..."
 # o project.yml desliga a assinatura (para o simulador e o CI); aqui ela é ligada só nesta compilação
 xcodebuild -project LanRemote.xcodeproj -scheme LanRemote -configuration Release \
@@ -38,7 +44,8 @@ xcodebuild -project LanRemote.xcodeproj -scheme LanRemote -configuration Release
   CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Automatic \
   DEVELOPMENT_TEAM="$TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE" -quiet build
 
-APP="build/DerivedData-iphone/Build/Products/Release-iphoneos/LanRemote.app"
+codesign --verify --deep --strict "$APP" 2>/dev/null \
+  || { echo "a assinatura do app compilado não confere: nada foi instalado" >&2; exit 1; }
 vence=$(security cms -D -i "$APP/embedded.mobileprovision" 2>/dev/null | plutil -extract ExpirationDate raw -o - - 2>/dev/null || true)
 if [[ -n "$vence" ]]; then
   segundos=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$vence" +%s 2>/dev/null || true)
