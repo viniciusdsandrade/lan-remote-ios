@@ -12,7 +12,6 @@
 		1E8362808910CD771EE928EF /* TVKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F6DA71A5704B15E50E1D5 /* TVKey.swift */; };
 		21CE4CADBF779D8A729CD475 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 04B357959760AD8680291990 /* Assets.xcassets */; };
 		29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */; };
-		4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */; };
 		645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75966A6C53E052479564B23 /* NetworkDiscovery.swift */; };
 		68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61301AED170777732BAB908 /* SettingsView.swift */; };
 		74012F9501BAE451489FAF42 /* AndroidTVIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */; };
@@ -46,7 +45,6 @@
 		22F4410D61B426F6A329E046 /* RemoteComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteComponents.swift; sourceTree = "<group>"; };
 		230A773E379AD6A2A4D9CADD /* LanRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LanRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		485BA31BA505293995C42790 /* AndroidTVRemote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVRemote.swift; sourceTree = "<group>"; };
-		57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeButtonHandler.swift; sourceTree = "<group>"; };
 		66556F8192F70568FAA0807C /* LGTVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LGTVClient.swift; sourceTree = "<group>"; };
 		6F042C13AEAA8E2C0F65EB14 /* LanRemoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteTests.swift; sourceTree = "<group>"; };
 		7709BCD8023FA41A710B8544 /* TVBoxLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVBoxLink.swift; sourceTree = "<group>"; };
@@ -152,7 +150,6 @@
 				F75966A6C53E052479564B23 /* NetworkDiscovery.swift */,
 				B7CDC46AC94BB061B7948515 /* ScreenText.swift */,
 				7709BCD8023FA41A710B8544 /* TVBoxLink.swift */,
-				57CE6B7EE8DBE0326F05F711 /* VolumeButtonHandler.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -266,7 +263,6 @@
 				B4E28A3EE6F94031B14AC51E /* TVBoxLink.swift in Sources */,
 				F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */,
 				1E8362808910CD771EE928EF /* TVKey.swift in Sources */,
-				4D58E1211D77544871B03347 /* VolumeButtonHandler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

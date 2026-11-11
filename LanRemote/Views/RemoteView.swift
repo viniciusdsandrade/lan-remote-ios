@@ -3,7 +3,6 @@ import UIKit
 
 struct RemoteView: View {
     @ObservedObject var client: LGTVClient
-    @StateObject private var volumeHandler = VolumeButtonHandler()
     @StateObject private var help = HelpCenter()
 
     @State private var showSettings: Bool = false
@@ -26,11 +25,6 @@ struct RemoteView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
-
-            // Invisible volume view for hardware button interception
-            HiddenVolumeViewRepresentable(handler: volumeHandler)
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 // MARK: - Top Header & Status Bar
@@ -108,22 +102,6 @@ struct RemoteView: View {
                 secondaryButton: .cancel(Text("Cancelar"))
             )
         }
-        .onAppear {
-            setupPhysicalVolumeButtons()
-        }
-        .onDisappear {
-            volumeHandler.stopListening()
-        }
-    }
-
-    private func setupPhysicalVolumeButtons() {
-        volumeHandler.onVolumeUp = {
-            client.sendKey(.volumeUp)
-        }
-        volumeHandler.onVolumeDown = {
-            client.sendKey(.volumeDown)
-        }
-        volumeHandler.startListening()
     }
 
     // MARK: - Header

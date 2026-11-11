@@ -9,7 +9,7 @@ struct ControlHelp: Identifiable, Equatable {
     let title: String        // heading in the help panel and in the guide
     let detail: String
     let symbol: String
-    var tip: String? = nil   // small badge, e.g. the phone's side buttons
+    var tip: String? = nil   // optional small badge
     var tint: Color? = nil   // color keys
 }
 
@@ -65,12 +65,12 @@ enum Help {
 
     // Volume and channels
     static let volumeUp = ControlHelp(id: "vol+", label: "", title: "Aumentar volume",
-        detail: "Aumenta o volume da TV um ponto por toque.", symbol: "speaker.plus", tip: "Botão lateral +")
+        detail: "Aumenta o volume da TV um ponto por toque.", symbol: "speaker.plus")
     static let volumeDown = ControlHelp(id: "vol-", label: "", title: "Diminuir volume",
-        detail: "Diminui o volume da TV um ponto por toque.", symbol: "speaker.minus", tip: "Botão lateral −")
+        detail: "Diminui o volume da TV um ponto por toque.", symbol: "speaker.minus")
     static let volume = ControlHelp(id: "vol", label: "Volume", title: "Volume + / −",
-        detail: "Aumenta ou diminui o volume da TV, um ponto por toque. Os botões laterais do iPhone também funcionam.",
-        symbol: "speaker.wave.2", tip: "Botões laterais")
+        detail: "Aumenta ou diminui o volume da TV, um ponto por toque.",
+        symbol: "speaker.wave.2")
     static let mute = ControlHelp(id: "mute", label: "Mudo", title: "Mudo",
         detail: "Corta o som na hora. Toque de novo para o som voltar no mesmo volume.",
         symbol: "speaker.slash.fill")

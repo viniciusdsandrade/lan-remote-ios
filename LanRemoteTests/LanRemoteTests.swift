@@ -573,6 +573,20 @@ final class LanRemoteTests: XCTestCase {
         }
     }
 
+    func testHardwareVolumeButtonsAreNotIntercepted() throws {
+        // Hardware volume buttons on the iPhone must adjust only the iPhone's own audio volume,
+        // never sending TV volume commands or hijacking AVAudioSession/MPVolumeView.
+        for help in [Help.volume, Help.volumeUp, Help.volumeDown] {
+            XCTAssertNil(help.tip, "\(help.id) must not advertise hardware side buttons")
+            XCTAssertFalse(help.detail.localizedCaseInsensitiveContains("lateral"),
+                           "\(help.id) detail must not claim side buttons control the TV")
+        }
+        XCTAssertNil(NSClassFromString("LanRemote.VolumeButtonHandler"),
+                     "VolumeButtonHandler must not exist in the app target")
+        XCTAssertNil(NSClassFromString("LanRemote.HiddenVolumeViewRepresentable"),
+                     "HiddenVolumeViewRepresentable must not exist in the app target")
+    }
+
     // MARK: - Deaf HTTP server, ping, IP conflict and DHCP relocation
 
     func testLoopbackAnswersICMPPing() async {

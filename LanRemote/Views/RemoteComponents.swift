@@ -301,17 +301,3 @@ struct NumericKeypadView: View {
         .controlHelp(help)
     }
 }
-
-// MARK: - Hidden Volume View Representable
-
-struct HiddenVolumeViewRepresentable: UIViewRepresentable {
-    let handler: VolumeButtonHandler
-
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView(frame: .zero)
-        handler.attachHiddenView(to: container)
-        return container
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-}

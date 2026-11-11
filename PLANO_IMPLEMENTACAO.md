@@ -15,7 +15,6 @@
 | **Descoberta de Rede** | Network framework (`NWConnection` / UDP Multicast SSDP) + Port Scanner TCP | Descoberta automática de TVs na LAN com fallback de varredura rápida na porta 8080. |
 | **Persistência Local** | `UserDefaults` com codificação JSON | Persistência atômica, segura e imediata de IP, porta, credenciais e sessão. |
 | **Feedback Tátil** | `UIImpactFeedbackGenerator` / `UINotificationFeedbackGenerator` | Haptics táteis refinados em cada clique de botão e navegação. |
-| **Integração com Hardware** | `AVAudioSession` / `MPVolumeView` | Interceptação das teclas físicas de volume do iPhone para comando direto na TV. |
 | **Gerenciamento de Projeto** | XcodeGen 2.46.0 (`project.yml`) | Reprodutibilidade determinística do `.xcodeproj` sem conflitos de merge Git. |
 
 ---
@@ -72,8 +71,7 @@ lan-remote-ios/
 │   ├── Services/
 │   │   ├── LGTVClient.swift             # Motor de rede, fila serial, debounce e sessão
 │   │   ├── NetworkDiscovery.swift       # Busca SSDP e varredura TCP de rede
-│   │   ├── HapticManager.swift          # Controlador de vibrações táteis
-│   │   └── VolumeButtonHandler.swift    # Interceptador de teclas físicas de volume
+│   │   └── HapticManager.swift          # Controlador de vibrações táteis
 │   ├── Views/
 │   │   ├── RemoteView.swift             # Tela principal com controles em zona de polegar
 │   │   ├── RemoteComponents.swift       # D-Pad circular, botões de comando e rockers
@@ -102,7 +100,7 @@ lan-remote-ios/
 2. **Fase 2: Motor de Rede e Protocolo ROAP**
    - Implementação de `TVKey`, `TVConfig`, `LGTVClient`.
    - Implementação de `NetworkDiscovery` com SSDP UDP Multicast e Port Scanner TCP.
-   - Implementação de `HapticManager` e `VolumeButtonHandler`.
+   - Implementação de `HapticManager`.
 3. **Fase 3: Interface de Usuário Mobile SwiftUI**
    - Telas ergonômicas `RemoteView`, `RemoteComponents`, `SettingsView`, `DiscoveryView`.
    - Suporte a Dark Mode OLED e haptics em todos os botões.
