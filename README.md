@@ -8,9 +8,10 @@ Aplicativo nativo para **iPhone** e **iPad** desenvolvido em **SwiftUI** para co
 
 - **Liga a TV sem levantar do sofá**: em standby a LG NetCast desliga a rede, então o app acorda a **TV Box** (Android TV) ligada no HDMI e ela liga a TV pelo **HDMI-CEC (SIMPLINK)**. Detalhes em [Ligar a TV pelo app](#-ligar-a-tv-pelo-app).
 - **Botões que se explicam**: ícone + nome em português em cada botão, agrupados por função (Navegação, Volume e canal, Recursos da TV, Reprodução, Botões coloridos). **Segurar** um botão mostra no rodapé o que ele faz, sem enviar nada à TV; o **?** abre o **Guia dos botões** completo. Os mesmos textos alimentam o VoiceOver.
-- **Estado da TV à vista**: `Ligada`, `Ligada · sem resposta` (quando a TV responde ao ping na rede mas a porta 8080 oscila; as teclas ficam na fila por até 15 s em ordem), `Ligada · conflito de IP` (quando outro equipamento responde no mesmo IP logo após a TV), `Ligada · falta parear` (quando a TV responde mas recusa o app: um cartão leva ao pareamento), `Desligada` ou `Ligando…` no topo, com volume e entrada atual. Com a TV desligada o controle fica esmaecido e um cartão mostra o botão **Ligar**. Quando o problema é o iPhone, e não a TV, o topo diz `iPhone fora do Wi-Fi` ou `Sem acesso à rede local` (permissão de Rede Local negada pelo iOS) e um cartão abre os Ajustes, em vez de mostrar a TV como desligada.
+- **Estado da TV à vista**: `Ligada`, `Ligada · sem resposta` (quando a TV responde ao ping na rede mas a porta 8080 oscila; um toque que não chega na hora é descartado, nunca enviado depois), `Ligada · conflito de IP` (quando outro equipamento responde no mesmo IP logo após a TV), `Ligada · falta parear` (quando a TV responde mas recusa o app: um cartão leva ao pareamento), `Desligada` ou `Ligando…` no topo, com volume e entrada atual. Com a TV desligada o controle fica esmaecido e um cartão mostra o botão **Ligar**. Quando o problema é o iPhone, e não a TV, o topo diz `iPhone fora do Wi-Fi` ou `Sem acesso à rede local` (permissão de Rede Local negada pelo iOS) e um cartão abre os Ajustes, em vez de mostrar a TV como desligada.
 - **Zero Dependências Externas**: Construído puramente sobre o ecossistema Apple (`SwiftUI`, `Network`, `Security`, `CryptoKit`, `Vision`).
 - **Arquitetura Serverless Local**: O iPhone comunica-se diretamente com a TV pela porta `8080` (HTTP) através da rede Wi-Fi local. Zero nuvem, zero telemetria e latência inferior a 100ms.
+- **Toque na hora ou nunca**: cada toque chega à TV em dezenas de milissegundos ou é descartado; nada fica guardado para sair depois. Toques de volume em sequência saem a cada 0,15 s e o volume para de mexer quando o dedo para. Detalhes em [Teclas: na hora ou nunca](#-teclas-na-hora-ou-nunca).
 - **Feedback Háptico Realista**: Cada botão (D-Pad, volume, ok, numérico, power) aciona vibrações táteis finas (`UIImpactFeedbackGenerator`).
 - **D-Pad Circular Ergonômico**: Direcionais táteis com botão central OK e gangorras verticais de volume e canal na zona de alcance do polegar.
 - **Descoberta Automática de Rede**: varredura da sub-rede **do próprio iPhone** (lida da interface Wi-Fi) na porta 8080, confirmando cada aparelho pelo ROAP; acha a TV em poucos segundos mesmo numa instalação nova ou depois de o roteador trocar o IP dela. No iPhone a busca SSDP/DLNA não recebe resposta: o iOS só deixa enviar multicast e broadcast a apps com o entitlement `com.apple.developer.networking.multicast`, que a Apple concede só a pedido e nunca a uma conta gratuita.
@@ -121,6 +122,32 @@ As Smart TVs LG de 2012–2013 utilizam o protocolo **ROAP / UDAP** sobre HTTP n
 
 > [!CRITICAL]
 > **Atenção ao cabeçalho User-Agent**: No firmware `05.02.11` da TV xxLN5700, requisições ROAP **não** podem conter `"UDAP/2.0"` no `User-Agent`. O app utiliza `User-Agent: lg_roap_control/1.0.0 (iOS)`.
+
+### ⚡ Teclas: na hora ou nunca
+
+Um toque vale na hora em que é dado. Se a TV não puder recebê-lo logo, ele é descartado: um passo de
+volume que chega segundos depois de o dedo sair do botão é pior do que um toque sem efeito.
+
+- **Sem fila que escorre.** Antes, cada toque entrava numa fila e saía a cada 0,3 s: dez toques em 1,2 s
+  faziam o volume continuar subindo por 2 s depois do último (medido na TV: 1,95 s). Agora só um toque
+  espera a vez; outro toque da mesma tecla nesse intervalo se junta a ele (e não vibra, porque não vira
+  outra tecla). Teclas diferentes, como os dígitos de um canal, continuam saindo todas, em ordem.
+- **Validade de 0,8 s.** Uma tecla que não saiu do iPhone até 0,8 s depois do toque é descartada; quando
+  é a TV que não aceita a conexão, o iPhone vibra em aviso. Com a TV `Ligada · sem resposta` os toques
+  não são guardados para depois.
+- **Descanso da TV.** A TV descarta uma tecla que chega cedo demais depois de outra. Entre passos de
+  volume o app espera 0,15 s a partir da resposta da tecla anterior (medido na xxLN5700: passos a 90 ms
+  ou mais registraram todos, a 55 ms um se perdeu); entre as demais teclas, os 0,3 s de sempre.
+- **Conexão própria, no máximo uma entrega.** As teclas não passam pelo `URLSession`
+  (`TVKeyLink.swift`). A TV perde um pedido de conexão (SYN) de vez em quando (2 em 474 numa medição) e
+  o sistema só o repete 1 s depois; o app abre outra tentativa a cada 0,25 s e a primeira que conectar
+  leva a tecla. Depois que a requisição saiu, ela nunca é reenviada: a TV poderia executar a tecla duas vezes.
+- **Volume no topo.** O número acompanha cada passo que a TV aceitou, e o app só pergunta o volume à TV
+  quando os toques param (as consultas usam o mesmo servidor da TV que as teclas).
+
+Conferido na TV real com `testLiveVolumeTapsStopWhenTheFingerStops` (opcional, veja o comentário do
+teste; ele nunca passa do volume 9, a não ser que se peça): 10 toques em 1,16 s viraram 8 teclas, a
+primeira respondida em 0,02 s e a última 0,11 s depois do último toque, e o volume da TV não mexeu mais.
 
 ---
 

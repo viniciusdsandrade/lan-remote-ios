@@ -11,6 +11,7 @@
 		0A995A1952C6FFA57086E67E /* AndroidTVRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485BA31BA505293995C42790 /* AndroidTVRemote.swift */; };
 		1E8362808910CD771EE928EF /* TVKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F6DA71A5704B15E50E1D5 /* TVKey.swift */; };
 		21CE4CADBF779D8A729CD475 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 04B357959760AD8680291990 /* Assets.xcassets */; };
+		264602D8DFA2ACA010FA48BE /* TVKeyLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC98EA5096F6AD0095EA5129 /* TVKeyLink.swift */; };
 		29627E5C2DE34B0FB1740914 /* LanRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */; };
 		645255E2CF751BF433119B21 /* NetworkDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75966A6C53E052479564B23 /* NetworkDiscovery.swift */; };
 		68791A1ADFE59127D60A8AD0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61301AED170777732BAB908 /* SettingsView.swift */; };
@@ -55,6 +56,7 @@
 		95B23D43535FAE885232C9B2 /* AndroidTVIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidTVIdentity.swift; sourceTree = "<group>"; };
 		A61301AED170777732BAB908 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B7CDC46AC94BB061B7948515 /* ScreenText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenText.swift; sourceTree = "<group>"; };
+		EC98EA5096F6AD0095EA5129 /* TVKeyLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVKeyLink.swift; sourceTree = "<group>"; };
 		F15F6DA71A5704B15E50E1D5 /* TVKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVKey.swift; sourceTree = "<group>"; };
 		F251C8C723C9484F71F14D24 /* LanRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanRemoteApp.swift; sourceTree = "<group>"; };
 		F75966A6C53E052479564B23 /* NetworkDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscovery.swift; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 				F75966A6C53E052479564B23 /* NetworkDiscovery.swift */,
 				B7CDC46AC94BB061B7948515 /* ScreenText.swift */,
 				7709BCD8023FA41A710B8544 /* TVBoxLink.swift */,
+				EC98EA5096F6AD0095EA5129 /* TVKeyLink.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -263,6 +266,7 @@
 				B4E28A3EE6F94031B14AC51E /* TVBoxLink.swift in Sources */,
 				F11BDF8A57263BD7D2FB89CD /* TVConfig.swift in Sources */,
 				1E8362808910CD771EE928EF /* TVKey.swift in Sources */,
+				264602D8DFA2ACA010FA48BE /* TVKeyLink.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

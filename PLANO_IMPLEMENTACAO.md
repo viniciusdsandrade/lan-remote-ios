@@ -69,7 +69,8 @@ lan-remote-ios/
 │   │   ├── TVKey.swift                  # Enum de códigos e descrições do protocolo ROAP
 │   │   └── TVConfig.swift               # Modelo de dados de conexão e autenticação
 │   ├── Services/
-│   │   ├── LGTVClient.swift             # Motor de rede, fila serial, debounce e sessão
+│   │   ├── LGTVClient.swift             # Motor de rede, sessão e envio das teclas (na hora ou nunca)
+│   │   ├── TVKeyLink.swift              # Conexão própria de cada tecla: corrida de tentativas, no máximo uma entrega
 │   │   ├── NetworkDiscovery.swift       # Busca SSDP e varredura TCP de rede
 │   │   └── HapticManager.swift          # Controlador de vibrações táteis
 │   ├── Views/
@@ -87,7 +88,7 @@ lan-remote-ios/
 │       ├── Assets.xcassets/             # Cores e ícone do aplicativo
 │       └── PrivacyInfo.xcprivacy        # Manifesto de privacidade exigido pela Apple
 └── LanRemoteTests/
-    └── LanRemoteTests.swift             # Testes unitários do cliente, parser XML, keys, protobuf, DER, Keychain, WoL
+    └── LanRemoteTests.swift             # Testes unitários do cliente, parser XML, keys, protobuf, DER, Keychain, WoL e envio das teclas contra uma TV falsa em loopback
 ```
 
 ---
@@ -118,3 +119,11 @@ lan-remote-ios/
    - Cada botão com ícone e nome, agrupados por função; segurar mostra a explicação; Guia dos botões.
    - Limites do iOS: sem broadcast (entitlement) e sem tabela ARP → MAC da TV Box pelos vizinhos do MAC
      Bluetooth (Bonjour `bt=`) ou digitado; IP da TV Box deve ser fixo no roteador.
+7. **Fase 7: Teclas na hora ou nunca**
+   - A fila que guardava cada toque e os soltava a cada 0,3 s (e por até 15 s com a TV sem responder) fazia
+     o volume continuar subindo depois do último toque. Agora um toque sai na hora ou é descartado: só um
+     toque espera a vez, a validade é de 0,8 s e nada é reenviado depois de sair do iPhone.
+   - Passos de volume a cada 0,15 s (medido na TV: a 90 ms ou mais todos registram, a 55 ms um se perde);
+     demais teclas a cada 0,3 s.
+   - `TVKeyLink.swift`: cada tecla numa conexão própria (`NWConnection`), com uma tentativa nova a cada
+     0,25 s enquanto nenhuma conecta, porque a TV perde pedidos de conexão e o sistema só os repete após 1 s.

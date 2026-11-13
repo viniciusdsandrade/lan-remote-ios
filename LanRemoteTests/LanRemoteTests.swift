@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import Security
 @testable import LanRemote
 
@@ -595,7 +596,7 @@ final class LanRemoteTests: XCTestCase {
     }
 
     @MainActor
-    func testDeafControlServerQueueingAuthRetryAndIPConflict() async throws {
+    func testDeafControlServerDropsKeysAuthRetryAndIPConflict() async throws {
         URLProtocol.registerClass(DeafTVStub.self)
         defer { URLProtocol.unregisterClass(DeafTVStub.self) }
         DeafTVStub.reset()
@@ -608,6 +609,7 @@ final class LanRemoteTests: XCTestCase {
         let client = LGTVClient(config: config, autoStart: false)
         var pingAlive = true
         var foreignOpen = false
+        client.keyTransport = keysThroughURLSession
         client.pingProbe = { _ in pingAlive }
         client.foreignHostProbe = { _ in foreignOpen }
         client.locateProbe = { _ in nil }
@@ -620,35 +622,31 @@ final class LanRemoteTests: XCTestCase {
         XCTAssertTrue(client.notAnswering)
         XCTAssertFalse(client.ipConflict)
 
-        // 2. Keys pressed while deaf wait and fire in exact FIFO order once HTTP returns (even across a 401)
+        // 2. Keys pressed while deaf are dropped: they don't wait for the control server, and nothing
+        //    fires late once HTTP answers again
         client.sendKey(.volumeUp)
         client.sendKey(.volumeUp)
         client.sendKey(.volumeDown)
-        try await Task.sleep(nanoseconds: 1_200_000_000)
+        try await Task.sleep(nanoseconds: 600_000_000)
         XCTAssertTrue(DeafTVStub.keys.isEmpty, "no key leaves while the control server is deaf")
 
         DeafTVStub.set(.answering, requireAuthOnce: true)
-        let deadline = Date().addingTimeInterval(6)
-        while DeafTVStub.keys.count < 3, Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        XCTAssertTrue(DeafTVStub.keys.isEmpty, "keys pressed while it was deaf never fire late")
+
+        // 3. With HTTP back a new key goes out at once, across an expired session (401)
+        client.sendKey(.volumeUp)
+        let deadline = Date().addingTimeInterval(3)
+        while DeafTVStub.keys.isEmpty, Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
-        XCTAssertEqual(DeafTVStub.keys, [24, 24, 25], "queued keys arrive in order once HTTP answers")
+        XCTAssertEqual(DeafTVStub.keys, [24])
         XCTAssertGreaterThanOrEqual(DeafTVStub.pairings, 1, "expired session (401) re-pairs before resending")
         XCTAssertEqual(client.powerState, .on)
         XCTAssertFalse(client.notAnswering)
-
-        // 3. Stale keys older than keyPatience are dropped instead of firing late
+        // the volume query that follows a volume key must be over before the next steps drive the status
+        try await Task.sleep(nanoseconds: 900_000_000)
         DeafTVStub.clearKeys()
-        DeafTVStub.set(.deaf)
-        client.keyPatience = 1.1
-        client.sendKey(.mute)
-        client.sendKey(.home)
-        try await Task.sleep(nanoseconds: 2_300_000_000)
-        DeafTVStub.set(.answering)
-        await client.refreshStatus()
-        try await Task.sleep(nanoseconds: 400_000_000)
-        XCTAssertTrue(DeafTVStub.keys.isEmpty, "stale keys older than keyPatience must be dropped")
-        client.keyPatience = 15
 
         // 4. During turningOn, ping before port 8080 answers keeps turningOn until HTTP 200 arrives
         DeafTVStub.set(.deaf)
@@ -813,6 +811,366 @@ final class LanRemoteTests: XCTestCase {
         await client.refreshStatus()
         XCTAssertFalse(client.needsPairing)
         XCTAssertEqual(client.powerState, .on)
+    }
+
+    // MARK: - Keys: at once or not at all
+
+    @MainActor
+    private func client(for tv: LoopbackTV) -> LGTVClient {
+        var config = TVConfig.default
+        config.host = "127.0.0.1"
+        config.port = Int(tv.port)
+        config.pairingKey = "123456"
+        config.session = "111222"
+        let client = LGTVClient(config: config, autoStart: false)
+        client.pingProbe = { _ in true }
+        client.foreignHostProbe = { _ in false }
+        client.locateProbe = { _ in nil }
+        client.networkBlockProbe = { _, _ in nil }
+        return client
+    }
+
+    private func seconds(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Double {
+        start.duration(to: end) / .seconds(1)
+    }
+
+    @MainActor
+    private func wait(upTo limit: Double, until condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(limit)
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @MainActor
+    func testVolumeTapsFasterThanTheTVTakesThemLeaveNothingToTrickleOut() async throws {
+        // The complaint: tapping the volume a few times, it kept climbing for seconds after the finger
+        // had stopped. Every tap waited in line, 0.3 s apart.
+        let tv = try LoopbackTV(level: 20)
+        defer { tv.stop() }
+        let client = client(for: tv)
+        XCTAssertEqual(client.volumeLevel, 10, "what the app shows before it ever asked the TV")
+
+        // 14 taps in 1.3 s, about twice what the TV takes
+        let firstTap = ContinuousClock.now
+        var lastTap = firstTap
+        for tap in 0..<14 {
+            if tap > 0 { try await Task.sleep(for: .milliseconds(100)) }
+            lastTap = .now
+            client.sendKey(.volumeUp)
+        }
+        XCTAssertGreaterThan(client.volumeLevel, 10, "the level shown follows the taps while they come")
+        try await Task.sleep(for: .milliseconds(1500))
+
+        let arrivals = tv.arrivals
+        XCTAssertTrue(arrivals.allSatisfy { $0.code == TVKey.volumeUp.rawValue })
+        XCTAssertGreaterThanOrEqual(arrivals.count, 6, "the TV gets a step every 0.15 s or so, not every 0.3 s")
+        XCTAssertLessThanOrEqual(arrivals.count, 10, "never more keys than the TV takes in that time")
+        let first = try XCTUnwrap(arrivals.first), last = try XCTUnwrap(arrivals.last)
+        XCTAssertLessThan(seconds(from: firstTap, to: first.at), 0.15, "the first tap goes out at once")
+        XCTAssertLessThan(seconds(from: lastTap, to: last.at), 0.30,
+                          "after the last tap only the one tap that was waiting may still go out")
+        for (earlier, later) in zip(arrivals, arrivals.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(seconds(from: earlier.at, to: later.at), 0.14, "the TV gets its rest between steps")
+        }
+        XCTAssertEqual(tv.discarded, 0, "no step comes sooner than the TV takes it")
+        XCTAssertEqual(tv.level, 20 + arrivals.count)
+        XCTAssertEqual(client.volumeLevel, tv.level, "once the taps stop the TV is asked for its volume")
+    }
+
+    @MainActor
+    func testEveryUnhurriedTapLandsAtOnce() async throws {
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+
+        var taps: [ContinuousClock.Instant] = []
+        for tap in 0..<5 {
+            if tap > 0 { try await Task.sleep(for: .milliseconds(250)) }
+            taps.append(.now)
+            client.sendKey(tap.isMultiple(of: 2) ? .volumeDown : .volumeUp)
+        }
+        try await Task.sleep(for: .milliseconds(400))
+
+        let arrivals = tv.arrivals
+        XCTAssertEqual(arrivals.map(\.code), [25, 24, 25, 24, 25], "four taps a second all reach the TV")
+        for (tap, arrival) in zip(taps, arrivals) {
+            XCTAssertLessThan(seconds(from: tap, to: arrival.at), 0.12, "each of them right when it was tapped")
+        }
+    }
+
+    @MainActor
+    func testTapsOnADeafTVAreDroppedNeverSentLate() async throws {
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+
+        // The control server stops taking connections, as the real one does for a while now and then
+        tv.set(.deaf)
+        for tap in 0..<3 {
+            if tap > 0 { try await Task.sleep(for: .milliseconds(60)) }
+            client.sendKey(.volumeUp)
+        }
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertTrue(tv.arrivals.isEmpty)
+
+        tv.set(.answering)
+        try await Task.sleep(for: .milliseconds(1500))
+        XCTAssertTrue(tv.arrivals.isEmpty, "taps the TV couldn't take are gone: none goes out once it listens again")
+
+        let tap = ContinuousClock.now
+        client.sendKey(.volumeUp)
+        try await wait(upTo: 1) { !tv.arrivals.isEmpty }
+        let arrival = try XCTUnwrap(tv.arrivals.first)
+        XCTAssertLessThan(seconds(from: tap, to: arrival.at), 0.3, "and the next tap works at once")
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(tv.arrivals.count, 1)
+    }
+
+    @MainActor
+    func testADroppedConnectionRequestCostsAQuarterSecondNotAFullOne() async throws {
+        // The TV drops a SYN now and then and the kernel repeats it only a second later; a fresh
+        // connection attempt gets through as soon as the TV listens again.
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+
+        tv.set(.deaf)
+        let tap = ContinuousClock.now
+        client.sendKey(.volumeUp)
+        try await Task.sleep(for: .milliseconds(300))
+        tv.set(.answering)
+        try await wait(upTo: 1) { !tv.arrivals.isEmpty }
+
+        let arrival = try XCTUnwrap(tv.arrivals.first, "the tap is still fresh: it must get through")
+        let landed = seconds(from: tap, to: arrival.at)
+        XCTAssertGreaterThan(landed, 0.3)
+        XCTAssertLessThan(landed, 0.8, "by a fresh attempt, not by the kernel repeating the first SYN after 1 s")
+        try await Task.sleep(for: .milliseconds(1300))
+        XCTAssertEqual(tv.arrivals.count, 1, "several connection attempts, one key")
+    }
+
+    @MainActor
+    func testAKeyTheTVMayHaveRunIsNeverSentAgain() async throws {
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+        client.keyAnswerTimeout = 0.4
+
+        // The TV takes the request and doesn't answer
+        tv.set(.silent)
+        client.sendKey(.volumeUp)
+        try await wait(upTo: 1) { !tv.arrivals.isEmpty }
+        XCTAssertEqual(tv.arrivals.count, 1)
+        try await Task.sleep(for: .milliseconds(1000))
+        tv.set(.answering)
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertEqual(tv.arrivals.count, 1, "no second request for the same tap")
+    }
+
+    @MainActor
+    func testExpiredSessionPairsAgainAndSendsTheKeyOnce() async throws {
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+
+        tv.refuseNextKey()
+        client.sendKey(.volumeUp)
+        try await wait(upTo: 1.5) { !tv.arrivals.isEmpty }
+        XCTAssertEqual(tv.arrivals.map(\.code), [24])
+        XCTAssertEqual(tv.pairings, 1)
+        XCTAssertEqual(client.config.session, "99887766")
+        XCTAssertEqual(client.powerState, .on)
+    }
+
+    @MainActor
+    func testDifferentKeysGoOutInOrderWithTheTVsRestAndStaleOnesAreDropped() async throws {
+        let tv = try LoopbackTV()
+        defer { tv.stop() }
+        let client = client(for: tv)
+
+        // A channel number typed quickly: every digit, in order, 0.3 s apart
+        client.sendKey(.digit1)
+        client.sendKey(.digit2)
+        client.sendKey(.digit5)
+        try await Task.sleep(for: .milliseconds(1100))
+        var arrivals = tv.arrivals
+        XCTAssertEqual(arrivals.map(\.code), [3, 4, 7])
+        for (earlier, later) in zip(arrivals, arrivals.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(seconds(from: earlier.at, to: later.at), 0.29)
+        }
+
+        // A TV slow to answer: the key behind would only leave 0.9 s after its tap, so it doesn't
+        tv.clear()
+        tv.answerDelay = 0.6
+        client.sendKey(.digit1)
+        client.sendKey(.digit2)
+        try await Task.sleep(for: .milliseconds(1700))
+        arrivals = tv.arrivals
+        XCTAssertEqual(arrivals.map(\.code), [3], "a key that can't leave within 0.8 s of its tap is dropped")
+    }
+
+    func testKeyRequestBytesAndAnswerParsing() async throws {
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "http://192.0.2.100:8080/roap/api/command")))
+        request.httpMethod = "POST"
+        request.setValue("lg_roap_control/1.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/atom+xml", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("<command/>".utf8)
+        let message = String(decoding: try XCTUnwrap(TVKeyLink.httpMessage(for: request)), as: UTF8.self)
+        XCTAssertEqual(message, "POST /roap/api/command HTTP/1.1\r\nHost: 192.0.2.100:8080\r\n"
+                       + "Content-Type: application/atom+xml\r\nUser-Agent: lg_roap_control/1.0.0 (iOS)\r\n"
+                       + "Content-Length: 10\r\n\r\n<command/>")
+
+        let query = URLRequest(url: try XCTUnwrap(URL(string: "http://192.0.2.100:8080/roap/api/data?target=volume_info&session=1")))
+        let queryMessage = String(decoding: try XCTUnwrap(TVKeyLink.httpMessage(for: query)), as: UTF8.self)
+        XCTAssertEqual(queryMessage, "GET /roap/api/data?target=volume_info&session=1 HTTP/1.1\r\nHost: 192.0.2.100:8080\r\n\r\n")
+
+        XCTAssertEqual(TVKeyLink.httpStatus(of: Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".utf8)), 200)
+        XCTAssertEqual(TVKeyLink.httpStatus(of: Data("HTTP/1.1 401 Unauthorized\r\n".utf8)), 401)
+        XCTAssertNil(TVKeyLink.httpStatus(of: Data("HTTP/1.1 20".utf8)), "the status line isn't in yet")
+        XCTAssertNil(TVKeyLink.httpStatus(of: Data("garbage\r\n".utf8)))
+        XCTAssertNil(TVKeyLink.httpStatus(of: Data()))
+        XCTAssertTrue(TVKeyLink.isWhole(Data("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok".utf8)))
+        XCTAssertTrue(TVKeyLink.isWhole(Data("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".utf8)))
+        XCTAssertFalse(TVKeyLink.isWhole(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\no".utf8)))
+        XCTAssertFalse(TVKeyLink.isWhole(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n".utf8)))
+        XCTAssertFalse(TVKeyLink.isWhole(Data("HTTP/1.1 200 OK\r\n\r\nbody until the TV closes".utf8)))
+
+        // Nothing listening: no connection, so nothing was sent, and the answer comes at the deadline
+        let listener = try LoopbackListener()
+        let closedPort = listener.port
+        listener.close()
+        var closed = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:\(closedPort)/roap/api/command")))
+        closed.httpMethod = "POST"
+        closed.httpBody = Data("<command/>".utf8)
+        let started = ContinuousClock.now
+        let delivery = await TVKeyLink.deliver(closed, connectWithin: 0.4, answerWithin: 1)
+        XCTAssertEqual(delivery, .notSent)
+        XCTAssertLessThan(seconds(from: started, to: .now), 0.8)
+    }
+
+    @MainActor
+    func testKeyRequestKeepsTheUserAgentRuleOnItsOwnConnection() throws {
+        // Keys no longer go through URLSession: the bytes on the wire must still follow the firmware's
+        // rule (no "UDAP/2.0" in the User-Agent of a ROAP request, or the TV answers 400).
+        let client = LGTVClient(config: TVConfig.default, autoStart: false)
+        let request = try XCTUnwrap(client.createRequest(path: "/roap/api/command", method: "POST", body: "<command/>"))
+        let message = String(decoding: try XCTUnwrap(TVKeyLink.httpMessage(for: request)), as: UTF8.self)
+        XCTAssertTrue(message.hasPrefix("POST /roap/api/command HTTP/1.1\r\nHost: 192.0.2.100:8080\r\n"))
+        XCTAssertTrue(message.contains("\r\nUser-Agent: lg_roap_control/1.0.0 (iOS)\r\n"))
+        XCTAssertFalse(message.contains("UDAP/2.0"))
+        XCTAssertTrue(message.contains("\r\nContent-Type: application/atom+xml\r\n"))
+        XCTAssertTrue(message.contains("\r\nConnection: Close\r\n"))
+        XCTAssertTrue(message.hasSuffix("\r\nContent-Length: 10\r\n\r\n<command/>"))
+    }
+
+    /// Opt-in check on the real TV of what the user sees: tapping the volume fast, the TV follows at
+    /// once and stops when the taps stop. It moves the volume a few steps and puts it back, and never
+    /// takes it above `LANREMOTE_LIVE_MAX_VOLUME` (9 unless set), so it can run with people in the room:
+    /// `TEST_RUNNER_LANREMOTE_LIVE_TV=1 TEST_RUNNER_LANREMOTE_LIVE_HOST=<ip> TEST_RUNNER_LANREMOTE_LIVE_KEY=<pairing key> xcodebuild test ... -only-testing:LanRemoteTests/LanRemoteTests/testLiveVolumeTapsStopWhenTheFingerStops`
+    @MainActor
+    func testLiveVolumeTapsStopWhenTheFingerStops() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["LANREMOTE_LIVE_TV"] == "1", let host = environment["LANREMOTE_LIVE_HOST"],
+              let pairingKey = environment["LANREMOTE_LIVE_KEY"] else {
+            throw XCTSkip("needs the LG NetCast TV: set LANREMOTE_LIVE_TV=1, LANREMOTE_LIVE_HOST and LANREMOTE_LIVE_KEY")
+        }
+        var config = TVConfig.default
+        config.host = host
+        config.pairingKey = pairingKey
+        config.session = environment["LANREMOTE_LIVE_SESSION"]
+        let client = LGTVClient(config: config, autoStart: false)
+        await client.refreshStatus()
+        guard client.powerState == .on, !client.notAnswering, !client.needsPairing, !client.isMuted else {
+            throw XCTSkip("the TV must be on, paired and not muted")
+        }
+        let before = client.volumeLevel
+        // Up only while the whole burst fits under the ceiling (a tap is a step at most); otherwise down,
+        // or a shorter burst.
+        let ceiling = Int(environment["LANREMOTE_LIVE_MAX_VOLUME"] ?? "") ?? 9
+        var taps = Int(environment["LANREMOTE_LIVE_TAPS"] ?? "") ?? 10
+        let roomUp = max(ceiling - before, 0)
+        let tapped: TVKey = taps <= roomUp || roomUp >= before ? .volumeUp : .volumeDown
+        taps = min(taps, tapped == .volumeUp ? roomUp : before)
+        guard taps >= 3 else {
+            throw XCTSkip("no room to move the volume: it is at \(before) and must stay within 0...\(ceiling)")
+        }
+        let session = client.config.session ?? ""
+        let volumeURL = try XCTUnwrap(URL(string: "http://\(host):\(config.port)/roap/api/data?target=volume_info&session=\(session)"))
+
+        // Every step the TV takes, timed by its answer to the key: the level shown moves right then.
+        // Nothing else asks the TV anything while the taps go, as when the app is in use.
+        var answered: [ContinuousClock.Instant] = []
+        let levelShown = client.$volumeLevel.dropFirst().sink { _ in answered.append(.now) }
+
+        let pace = Int(environment["LANREMOTE_LIVE_PACE_MS"] ?? "") ?? 125
+        let firstTap = ContinuousClock.now
+        var lastTap = firstTap
+        for tap in 0..<taps {
+            if tap > 0 { try await Task.sleep(for: .milliseconds(pace)) }
+            lastTap = .now
+            client.sendKey(tapped)
+        }
+
+        // From the last tap on, the TV's own volume about ten times a second: does it keep moving?
+        var readings: [(at: ContinuousClock.Instant, level: Int)] = []
+        await withTaskGroup(of: (at: ContinuousClock.Instant, level: Int)?.self) { group in
+            for _ in 0..<32 {
+                group.addTask {
+                    var request = URLRequest(url: volumeURL)
+                    request.timeoutInterval = 0.6
+                    request.setValue("Close", forHTTPHeaderField: "Connection")
+                    request.setValue("lg_roap_control/1.0.0 (iOS)", forHTTPHeaderField: "User-Agent")
+                    guard let (data, _) = try? await URLSession.shared.data(for: request),
+                          let text = LGTVClient.extractXMLTag(from: String(decoding: data, as: UTF8.self), tag: "level"),
+                          let level = Int(text) else { return nil }
+                    return (.now, level)
+                }
+                try? await Task.sleep(for: .milliseconds(95))
+                if ContinuousClock.now > lastTap + .milliseconds(450) { levelShown.cancel() }
+            }
+            for await reading in group {
+                if let reading { readings.append(reading) }
+            }
+        }
+        levelShown.cancel()
+        readings.sort { $0.at < $1.at }
+
+        // Put the volume back, unhurried, whatever the checks below say
+        for _ in 0..<4 {
+            try await Task.sleep(for: .milliseconds(900))
+            await client.refreshStatus()
+            let off = client.volumeLevel - before
+            if off == 0 { break }
+            for _ in 0..<abs(off) {
+                client.sendKey(off > 0 ? .volumeDown : .volumeUp)
+                try await Task.sleep(for: .milliseconds(450))
+            }
+        }
+        try await Task.sleep(for: .milliseconds(900))
+        await client.refreshStatus()
+        XCTAssertEqual(client.volumeLevel, before, "the test must leave the volume as it found it")
+
+        let settled = try XCTUnwrap(readings.last, "the TV never told its volume")
+        var lastMove: ContinuousClock.Instant?
+        for (earlier, later) in zip(readings, readings.dropFirst()) where earlier.level != later.level {
+            lastMove = later.at
+        }
+        let tail = lastMove.map { seconds(from: lastTap, to: $0) } ?? 0
+        let firstAnswer = try XCTUnwrap(answered.first, "the TV took no key")
+        let lastAnswer = try XCTUnwrap(answered.last)
+        let times = answered.map { String(format: "%.2f", seconds(from: firstTap, to: $0)) }.joined(separator: " ")
+        let after = readings.map { String(format: "%+.2f:%d", seconds(from: lastTap, to: $0.at), $0.level) }.joined(separator: " ")
+        print("live volume: \(taps) taps in \(String(format: "%.2f", seconds(from: firstTap, to: lastTap))) s -> "
+              + "\(answered.count) keys answered at [\(times)] s; the last one \(String(format: "%+.2f", seconds(from: lastTap, to: lastAnswer))) s "
+              + "after the last tap; TV volume \(before) -> \(settled.level), last move \(String(format: "%+.2f", tail)) s after the last tap; "
+              + "readings after the last tap [\(after)]")
+        XCTAssertGreaterThanOrEqual(answered.count, 2)
+        XCTAssertLessThanOrEqual(settled.level, max(ceiling, before), "never above the ceiling")
+        XCTAssertLessThan(seconds(from: firstTap, to: firstAnswer), 0.35, "the first tap reaches the TV at once")
+        XCTAssertLessThan(seconds(from: lastTap, to: lastAnswer), 0.45, "only the tap that was waiting goes out after the last one")
+        XCTAssertLessThan(tail, 0.6, "the TV's volume stops moving when the taps stop")
+        XCTAssertEqual(abs(settled.level - before), answered.count, "the TV took every step it answered: none came too soon for it")
     }
 }
 
@@ -1002,4 +1360,243 @@ private final class Counter: @unchecked Sendable {
     private var count = 0
     var value: Int { lock.withLock { count } }
     func increment() { lock.withLock { count += 1 } }
+}
+
+/// Sends a key's request through URLSession, where the URLProtocol stubs of these tests answer it.
+private let keysThroughURLSession: @Sendable (URLRequest, TimeInterval, TimeInterval) async -> KeyDelivery = { request, _, _ in
+    guard let (_, response) = try? await URLSession.shared.data(for: request) else { return .notSent }
+    return .answered(status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+}
+
+/// A TV on 127.0.0.1 with a real TCP server, so keys reach it through the app's own connection code
+/// (the URLProtocol stubs only see URLSession). It answers like the NetCast control server, notes when
+/// each key arrived, discards a key repeated too soon as the real TV does, and can stop answering the
+/// two ways the real one does: connection requests dropped (`deaf`: with its accept queue full the
+/// kernel drops SYNs, without a refusal) or requests taken and never answered (`silent`).
+private final class LoopbackTV: @unchecked Sendable {
+    enum Mode { case answering, deaf, silent }
+
+    let port: UInt16
+    /// How soon a repeated key is discarded: on the xxLN5700, between 55 ms (lost) and 90 ms (kept).
+    static let debounce: Duration = .milliseconds(90)
+
+    private let listenFD: Int32
+    private let lock = NSLock()
+    private var mode: Mode = .answering
+    private var stopped = false
+    private var plugs: [Int32] = []
+    private var held: [Int32] = []
+    private var _arrivals: [(code: Int, at: ContinuousClock.Instant)] = []
+    private var _discarded = 0
+    private var _level: Int
+    private var _pairings = 0
+    private var _refuseNextKey = false
+    private var _answerDelay: Double = 0
+
+    var arrivals: [(code: Int, at: ContinuousClock.Instant)] { lock.withLock { _arrivals } }
+    var discarded: Int { lock.withLock { _discarded } }
+    var level: Int { lock.withLock { _level } }
+    var pairings: Int { lock.withLock { _pairings } }
+    var answerDelay: Double {
+        get { lock.withLock { _answerDelay } }
+        set { lock.withLock { _answerDelay = newValue } }
+    }
+
+    init(level: Int = 10) throws {
+        _level = level
+        let socketFD = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard socketFD >= 0 else { throw POSIXError(.EMFILE) }
+        var on: Int32 = 1
+        setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bound = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        // A queue of one: a single idle connection fills it, and the kernel drops the next SYNs.
+        guard bound == 0, listen(socketFD, 1) == 0 else {
+            Darwin.close(socketFD)
+            throw POSIXError(.EADDRINUSE)
+        }
+        _ = fcntl(socketFD, F_SETFL, fcntl(socketFD, F_GETFL, 0) | O_NONBLOCK)
+        var actual = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &actual) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketFD, $0, &len) }
+        }
+        listenFD = socketFD
+        port = UInt16(bigEndian: actual.sin_port)
+        Thread.detachNewThread { [self] in serve() }
+    }
+
+    func set(_ newMode: Mode) {
+        let (old, release) = lock.withLock { () -> (Mode, [Int32]) in
+            let old = mode
+            mode = newMode
+            guard newMode == .answering else { return (old, []) }
+            defer { held.removeAll() }
+            return (old, held)
+        }
+        release.forEach { Darwin.close($0) }
+        if newMode == .deaf, old != .deaf { plug() }
+        if newMode != .deaf, old == .deaf { unplug() }
+    }
+
+    /// The next key gets a 401, as when the TV was switched off and on and the session died.
+    func refuseNextKey() { lock.withLock { _refuseNextKey = true } }
+
+    func clear() {
+        lock.withLock {
+            _arrivals.removeAll()
+            _discarded = 0
+        }
+    }
+
+    func stop() {
+        let open = lock.withLock { () -> [Int32] in
+            stopped = true
+            defer { plugs.removeAll(); held.removeAll() }
+            return plugs + held
+        }
+        open.forEach { Darwin.close($0) }
+    }
+
+    /// Fills the accept queue with idle connections of its own; `serve` accepts nothing while deaf.
+    private func plug() {
+        for _ in 0..<16 {
+            let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+            guard fd >= 0 else { return }
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+            _ = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            lock.withLock { plugs.append(fd) }
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            if poll(&pfd, 1, 150) <= 0 { return }   // no answer to this one: the queue is full
+        }
+    }
+
+    private func unplug() {
+        let open = lock.withLock { () -> [Int32] in
+            defer { plugs.removeAll() }
+            return plugs
+        }
+        open.forEach { Darwin.close($0) }
+    }
+
+    private func serve() {
+        while true {
+            let (done, fd) = lock.withLock { () -> (Bool, Int32) in
+                if stopped { return (true, -1) }
+                return (false, mode == .deaf ? -1 : accept(listenFD, nil, nil))
+            }
+            if done { break }
+            guard fd >= 0 else {
+                usleep(2_000)
+                continue
+            }
+            handle(fd)
+        }
+        Darwin.close(listenFD)
+    }
+
+    private func handle(_ fd: Int32) {
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) & ~O_NONBLOCK)
+        guard let request = Self.readRequest(fd) else {   // one of the plugs, or a client that gave up
+            Darwin.close(fd)
+            return
+        }
+        let arrived = ContinuousClock.now
+        let isKey = request.target.hasSuffix("/command")
+        let code = Self.value(of: "value", in: request.body).flatMap { Int($0) }
+
+        var status = 200
+        var body = "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><ROAPError>200</ROAPError><ROAPErrorDetail>OK</ROAPErrorDetail></envelope>"
+        let (keep, delay) = lock.withLock { () -> (Bool, Double) in
+            if mode == .silent {
+                if isKey, let code { _arrivals.append((code, arrived)) }
+                held.append(fd)
+                return (true, 0)
+            }
+            if isKey, let code {
+                if _refuseNextKey {
+                    _refuseNextKey = false
+                    status = 401
+                } else {
+                    if let last = _arrivals.last, last.code == code, last.at.duration(to: arrived) < Self.debounce {
+                        _discarded += 1
+                    } else if code == TVKey.volumeUp.rawValue {
+                        _level += 1
+                    } else if code == TVKey.volumeDown.rawValue {
+                        _level -= 1
+                    }
+                    _arrivals.append((code, arrived))
+                }
+            } else if request.target.hasSuffix("/auth") {
+                _pairings += 1
+                body = "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><ROAPError>200</ROAPError><session>99887766</session></envelope>"
+            } else if request.target.contains("volume_info") {
+                body = "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><ROAPError>200</ROAPError><data><mute>false</mute><minLevel>0</minLevel><maxLevel>100</maxLevel><level>\(_level)</level></data></envelope>"
+            } else if request.target.contains("cur_channel") {
+                body = "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><ROAPError>200</ROAPError><data><major>65520</major><inputSourceName>HDMI2</inputSourceName></data></envelope>"
+            }
+            return (false, _answerDelay)
+        }
+        if keep { return }
+        if delay > 0 { usleep(useconds_t(delay * 1_000_000)) }
+
+        if status != 200 { body = "" }
+        let head = "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Unauthorized")\r\nContent-Type: text/xml; charset=utf-8\r\n"
+            + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+        let bytes = Array((head + body).utf8)
+        var sent = 0
+        while sent < bytes.count {
+            let n = bytes[sent...].withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+            guard n > 0 else { break }
+            sent += n
+        }
+        Darwin.close(fd)
+    }
+
+    /// The request on `fd`: its target and body, once the head and the body it announces are in.
+    private static func readRequest(_ fd: Int32) -> (target: String, body: String)? {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let deadline = ContinuousClock.now + .milliseconds(800)
+        while ContinuousClock.now < deadline {
+            if let headEnd = data.range(of: Data("\r\n\r\n".utf8)) {
+                let head = String(decoding: data[data.startIndex..<headEnd.lowerBound], as: UTF8.self)
+                let lines = head.components(separatedBy: "\r\n")
+                let length = lines.dropFirst()
+                    .first { $0.lowercased().hasPrefix("content-length:") }
+                    .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+                if data.distance(from: headEnd.upperBound, to: data.endIndex) >= length {
+                    let parts = lines[0].split(separator: " ")
+                    guard parts.count >= 2 else { return nil }
+                    return (String(parts[1]), String(decoding: data[headEnd.upperBound...], as: UTF8.self))
+                }
+            }
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            guard poll(&pfd, 1, 100) > 0 else { continue }
+            let n = recv(fd, &buffer, buffer.count, 0)
+            guard n > 0 else { return nil }
+            data.append(buffer, count: n)
+        }
+        return nil
+    }
+
+    private static func value(of tag: String, in xml: String) -> String? {
+        guard let start = xml.range(of: "<\(tag)>"), let end = xml.range(of: "</\(tag)>") else { return nil }
+        return String(xml[start.upperBound..<end.lowerBound])
+    }
 }

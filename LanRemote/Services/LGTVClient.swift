@@ -8,7 +8,8 @@ import UIKit
 final class LGTVClient: ObservableObject {
     @Published var config: TVConfig
     @Published var powerState: TVPowerState = .unknown
-    /// On, but its control server isn't taking requests (see `checkTVPing`): recent keys wait briefly.
+    /// On, but its control server isn't taking requests (see `checkTVPing`): a key pressed meanwhile is
+    /// dropped, not kept for later.
     @Published var notAnswering: Bool = false
     /// Another device on the LAN answered at the TV's IP right after the TV was active there.
     @Published var ipConflict: Bool = false
@@ -38,13 +39,32 @@ final class LGTVClient: ObservableObject {
     var isConnected: Bool { powerState == .on }
 
     private var pollTimer: Timer?
-    private var lastSendTime: DispatchTime = .now()
-    private let minGapSeconds: Double = 0.30
-    private var pendingKeys: [(code: Int, label: String, pressed: Date)] = []
+
+    // Keys go out at once or not at all: see `sendKey`.
+    private struct PendingKey {
+        let key: TVKey
+        var pressed: ContinuousClock.Instant
+    }
+    private var pendingKeys: [PendingKey] = []
     private var sendingKeys = false
-    /// How long a key waits for the control server to come back before it is dropped (short enough
-    /// never to surprise the user a minute later with stale volume or navigation presses).
-    var keyPatience: TimeInterval = 15
+    /// The last key the TV may have run, and when its answer came (or was given up on).
+    private var lastKey: (key: TVKey, answered: ContinuousClock.Instant)?
+    private var volumeFollowUp: Task<Void, Never>?
+    /// How long after the tap a key may still leave for the TV. One that can't go by then is dropped: a
+    /// volume step landing after the finger left the button is worse than a tap that did nothing.
+    var keyFreshness: TimeInterval = 0.8
+    /// Rest the TV needs between two keys, counted from the previous key's answer: it discards a key
+    /// that comes too soon after another, and 0.3 s is the spacing checked on the xxLN5700 for all of them.
+    var keyRest: TimeInterval = 0.30
+    /// The same between two volume steps, the keys tapped in a row. Measured on the xxLN5700: steps
+    /// 90 ms apart or more all registered, steps 55 ms apart lost one.
+    var volumeRest: TimeInterval = 0.15
+    /// How long the TV has to answer a key it received before the app moves on to the next one.
+    var keyAnswerTimeout: TimeInterval = 2.0
+    /// Takes one key's request to the TV (see `TVKeyLink`). Tests put their own in.
+    var keyTransport: @Sendable (URLRequest, _ connectWithin: TimeInterval, _ answerWithin: TimeInterval) async -> KeyDelivery = {
+        await TVKeyLink.deliver($0, connectWithin: $1, answerWithin: $2)
+    }
     var pingProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.answersPing($0) }
     var foreignHostProbe: @Sendable (String) async -> Bool = { await LGTVDiscovery.hasForeignService($0) }
     var locateProbe: @Sendable (TVConfig) async -> String? = { await LGTVDiscovery.locate(matching: $0) }
@@ -121,7 +141,9 @@ final class LGTVClient: ObservableObject {
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.refreshStatus()
+                // The queries go to the same control server as the keys: not while keys are on their way.
+                guard let self, !self.sendingKeys else { return }
+                await self.refreshStatus()
             }
         }
     }
@@ -159,8 +181,11 @@ final class LGTVClient: ObservableObject {
         return req
     }
 
-    // MARK: - Command Execution with Debounce
+    // MARK: - Keys: at once or not at all
 
+    /// A tap reaches the TV right away or is dropped; it is never kept to be sent later. Keys used to
+    /// wait in line 0.3 s apart (and up to 15 s for a TV that wasn't answering), so tapping the volume
+    /// faster than that left it climbing for seconds after the finger had stopped.
     func sendKey(_ key: TVKey) {
         guard powerState != .off, powerState != .turningOn, networkBlock == nil else {
             // Nothing to send to; point the user at the "turn on" banner instead of failing silently.
@@ -169,39 +194,45 @@ final class LGTVClient: ObservableObject {
             return
         }
 
+        // Taps of one key faster than the TV takes them don't pile up: the tap already waiting stands
+        // for them (no click either, since no further key will go out for this one).
+        if let waiting = pendingKeys.indices.last, pendingKeys[waiting].key == key {
+            pendingKeys[waiting].pressed = .now
+            return
+        }
+
         // Trigger specific haptic feedback based on key type
         triggerHaptic(for: key)
 
-        pendingKeys.append((key.rawValue, key.label, Date()))
+        pendingKeys.append(PendingKey(key: key, pressed: .now))
         guard !sendingKeys else { return }
         sendingKeys = true
         Task { [weak self] in await self?.sendPendingKeys() }
     }
 
-    /// Sends the keys one at a time, in the order they were pressed: a key waiting for the TV holds
-    /// the ones pressed after it, and any key that waited longer than `keyPatience` is dropped.
+    /// Sends the waiting keys one at a time, in the order they were pressed, leaving the TV its rest
+    /// between two of them. A key that hasn't left `keyFreshness` after its tap is dropped.
     private func sendPendingKeys() async {
-        while !pendingKeys.isEmpty {
-            guard powerState != .off else {
+        while let next = pendingKeys.first {
+            guard powerState != .off, networkBlock == nil else {
                 pendingKeys.removeAll()
                 break
             }
-            let key = pendingKeys.removeFirst()
-            guard Date().timeIntervalSince(key.pressed) < keyPatience else {
-                NSLog("LG TV: tecla %@ descartada, esperou mais de %.0f s na fila", key.label, keyPatience)
+            if let lastKey {
+                let rest = Duration.seconds(next.key.isVolumeStep && lastKey.key.isVolumeStep ? volumeRest : keyRest)
+                let rested = lastKey.answered.duration(to: .now)
+                if rested < rest {
+                    // Taps keep coming meanwhile, and the TV may go off: look at the line again after.
+                    try? await Task.sleep(for: rest - rested)
+                    continue
+                }
+            }
+            let pending = pendingKeys.removeFirst()
+            guard pending.pressed.duration(to: .now) < .seconds(keyFreshness) else {
+                NSLog("LG TV: tecla %@ descartada, não saiu em %.1f s", pending.key.label, keyFreshness)
                 continue
             }
-
-            // Debounce timing: Ensure min gap between key transmissions to avoid TV packet drop
-            let now = DispatchTime.now()
-            let elapsed = Double(now.uptimeNanoseconds - lastSendTime.uptimeNanoseconds) / 1_000_000_000.0
-            if elapsed < minGapSeconds {
-                let waitNanos = UInt64((minGapSeconds - elapsed) * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: waitNanos)
-            }
-            lastSendTime = DispatchTime.now()
-
-            await performSendKey(code: key.code, label: key.label, pressed: key.pressed)
+            await deliver(pending)
         }
         sendingKeys = false
     }
@@ -225,90 +256,101 @@ final class LGTVClient: ObservableObject {
         }
     }
 
-    private func performSendKey(code: Int, label: String, pressed: Date,
-                                allowAuthRetry: Bool = true, allowRelocate: Bool = true) async {
-        let session = config.session ?? ""
-        let xml: String
-        let path: String
-
+    private func keyRequest(for key: TVKey) -> URLRequest? {
+        let code = key.rawValue
         if config.protocolType == "udap" {
-            path = "/udap/api/command"
-            xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><api type=\"command\"><name>HandleKeyInput</name><value>\(code)</value></api></envelope>"
-        } else {
-            path = "/roap/api/command"
-            xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><command><session>\(session)</session><type>HandleKeyInput</type><value>\(code)</value></command>"
+            return createRequest(path: "/udap/api/command", method: "POST",
+                                 body: "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><api type=\"command\"><name>HandleKeyInput</name><value>\(code)</value></api></envelope>")
         }
+        return createRequest(path: "/roap/api/command", method: "POST",
+                             body: "<?xml version=\"1.0\" encoding=\"utf-8\"?><command><session>\(config.session ?? "")</session><type>HandleKeyInput</type><value>\(code)</value></command>")
+    }
 
-        guard let req = createRequest(path: path, method: "POST", body: xml) else { return }
+    /// One try for one tap, while it is fresh. Once the request has left it is never sent again: a key
+    /// run twice, or seconds late, is worse than a tap that did nothing.
+    private func deliver(_ pending: PendingKey, afterPairing: Bool = false) async {
+        let key = pending.key
+        let left = (Duration.seconds(keyFreshness) - pending.pressed.duration(to: .now)) / .seconds(1)
+        guard left > 0, let request = keyRequest(for: key) else { return }
 
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            if let httpResp = resp as? HTTPURLResponse {
-                if httpResp.statusCode == 200 {
-                    // The power key only switches the TV off: its network goes down right after.
-                    if code == TVKey.power.rawValue {
-                        notAnswering = false
-                        ipConflict = false
-                        self.powerState = .off
-                        poweredOffAt = Date()
-                        lastAnsweredAt = nil
-                    } else {
-                        markAnswering()
-                        needsPairing = false
-                        self.powerState = .on
-                    }
-
-                    // Trigger status refresh shortly after volume/channel commands
-                    if code == TVKey.volumeUp.rawValue || code == TVKey.volumeDown.rawValue || code == TVKey.mute.rawValue {
-                        Task { [weak self] in
-                            try? await Task.sleep(nanoseconds: 350_000_000)
-                            await self?.refreshStatus()
-                        }
-                    }
-                    return
-                } else if httpResp.statusCode == 401 && allowAuthRetry {
-                    // Session expired or unauthenticated; attempt re-pairing
-                    markAnswering()
-                    switch await self.pairWithSavedKey() {
-                    case .paired:
-                        await self.performSendKey(code: code, label: label, pressed: pressed,
-                                                  allowAuthRetry: false, allowRelocate: false)
-                        return
-                    case .rejected:
-                        markNeedsPairing()
-                        NSLog("LG TV: tecla %@ recusada, o app precisa ser pareado com a TV", label)
-                    case .noAnswer:
-                        NSLog("LG TV: tecla %@ perdida, a TV não respondeu ao pareamento", label)
-                    }
-                } else {
-                    let respStr = String(data: data, encoding: .utf8) ?? ""
-                    NSLog("LG TV rejected key %@ (HTTP %d): %@", label, httpResp.statusCode, respStr)
-                }
+        switch await keyTransport(request, left, keyAnswerTimeout) {
+        case .answered(status: 200):
+            keyTaken(key)
+        case .answered(status: 401) where !afterPairing:
+            // Session expired or unauthenticated; attempt re-pairing
+            markAnswering()
+            switch await pairWithSavedKey() {
+            case .paired:
+                await deliver(pending, afterPairing: true)
+            case .rejected:
+                markNeedsPairing()
+                NSLog("LG TV: tecla %@ recusada, o app precisa ser pareado com a TV", key.label)
+            case .noAnswer:
+                NSLog("LG TV: tecla %@ perdida, a TV não respondeu ao pareamento", key.label)
             }
-        } catch {
-            if await networkBlockedFast(by: error) { return }
-            if allowRelocate, await relocateTVIfNeeded() {
-                await performSendKey(code: code, label: label, pressed: pressed,
-                                     allowAuthRetry: allowAuthRetry, allowRelocate: false)
-                return
-            }
-            switch await checkTVPing() {
-            case .aliveSameTV:
-                markNotAnswering(conflict: false)
-            case .ipConflict:
-                markNotAnswering(conflict: true)
-            case .unreachable:
-                await resolveUnreachable()
-                return
-            }
-            guard Date().timeIntervalSince(pressed) < keyPatience else {
-                NSLog("LG TV: tecla %@ descartada, a TV ficou %.0f s sem aceitar comandos", label, keyPatience)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            await performSendKey(code: code, label: label, pressed: pressed,
-                                 allowAuthRetry: allowAuthRetry, allowRelocate: false)
+        case .answered(let status):
+            NSLog("LG TV rejected key %@ (HTTP %d)", key.label, status)
+        case .notSent:
+            // The tap did nothing and won't: say so, as when a key is pressed with the TV off.
+            NSLog("LG TV: tecla %@ descartada, a TV não aceitou a conexão a tempo", key.label)
+            HapticManager.shared.warning()
+            checkOnTV()
+        case .unanswered:
+            // The TV may have run it: it gets its rest all the same.
+            lastKey = (key, .now)
+            NSLog("LG TV: tecla %@ enviada, sem resposta da TV em %.1f s", key.label, keyAnswerTimeout)
+            checkOnTV()
         }
+    }
+
+    private func keyTaken(_ key: TVKey) {
+        lastKey = (key, .now)
+        // The power key only switches the TV off: its network goes down right after.
+        if key == .power {
+            notAnswering = false
+            ipConflict = false
+            powerState = .off
+            poweredOffAt = Date()
+            lastAnsweredAt = nil
+            return
+        }
+        markAnswering()
+        needsPairing = false
+        powerState = .on
+
+        // The level shown follows the steps the TV took; the TV itself is asked once the taps stop.
+        switch key {
+        case .volumeUp:
+            volumeLevel = min(volumeLevel + 1, 100)
+            followVolume()
+        case .volumeDown:
+            volumeLevel = max(volumeLevel - 1, 0)
+            followVolume()
+        case .mute:
+            followVolume()
+        default:
+            break
+        }
+    }
+
+    /// Asks the TV for its volume and mute once the taps stop, instead of after every step: the queries
+    /// go to the same control server as the keys.
+    private func followVolume() {
+        volumeFollowUp?.cancel()
+        volumeFollowUp = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            while !Task.isCancelled, let self, self.sendingKeys || self.isRefreshing {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard !Task.isCancelled else { return }
+            await self?.refreshStatus()
+        }
+    }
+
+    /// A key didn't get through: finds out why (standby, control server not answering, another IP,
+    /// iPhone off the LAN) without holding the next taps back.
+    private func checkOnTV() {
+        Task { [weak self] in await self?.refreshStatus() }
     }
 
     private enum PingStatus {

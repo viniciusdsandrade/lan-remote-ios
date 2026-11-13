@@ -106,4 +106,9 @@ enum TVKey: Int, CaseIterable, Identifiable, Sendable {
     var isDigit: Bool {
         return rawValue >= TVKey.digit0.rawValue && rawValue <= TVKey.digit9.rawValue
     }
+
+    /// Volume up and down: the keys tapped in a row, which the TV takes closer together than the rest.
+    var isVolumeStep: Bool {
+        return self == .volumeUp || self == .volumeDown
+    }
 }

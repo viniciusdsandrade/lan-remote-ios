@@ -141,7 +141,7 @@ enum Help {
     static let inputStatus = ControlHelp(id: "input-status", label: "", title: "Entrada atual",
         detail: "Fonte que a TV está mostrando: TV, HDMI, AV…", symbol: "tv")
     static let notAnsweringStatus = ControlHelp(id: "deaf-status", label: "", title: "TV ligada, sem resposta",
-        detail: "A TV respondeu ao ping, mas a porta 8080 não aceitou conexão agora. Os botões apertados aguardam até 15 s para sair na ordem.",
+        detail: "A TV respondeu ao ping, mas a porta 8080 não aceitou conexão agora. Um toque que não chega na hora é descartado, e não enviado depois: toque de novo quando ela voltar.",
         symbol: "exclamationmark.triangle.fill")
     static let ipConflictStatus = ControlHelp(id: "conflict-status", label: "", title: "Conflito de IP na rede",
         detail: "Outro aparelho na rede respondeu no mesmo IP da TV. Fixe um IP para a TV no roteador ou use Buscar TV na rede.",
